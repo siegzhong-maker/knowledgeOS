@@ -19,6 +19,23 @@ class Database {
           return reject(new Error('DATABASE_URL environment variable is required for PostgreSQL'));
         }
 
+        // 调试日志：输出数据库连接信息（隐藏密码）
+        try {
+          const url = new URL(connectionString);
+          const host = url.hostname;
+          const port = url.port || '5432';
+          console.log(`[Database] 连接信息: ${url.protocol}//${url.username}@${host}:${port}${url.pathname}`);
+          
+          // 检查是否是预期的 Supabase 地址
+          if (!host.includes('supabase.co') && !host.includes('amazonaws.com')) {
+            console.warn(`[Database] 警告: 数据库主机 "${host}" 不是预期的 Supabase 地址`);
+          }
+        } catch (urlError) {
+          // 如果 URL 解析失败，输出原始字符串的部分信息（隐藏密码）
+          const maskedUrl = connectionString.replace(/:[^:@]+@/, ':****@');
+          console.log(`[Database] 连接字符串: ${maskedUrl.substring(0, 100)}...`);
+        }
+
         this._pool = new Pool({
           connectionString: connectionString,
           ssl: connectionString.includes('supabase') || connectionString.includes('amazonaws.com') 
