@@ -18,7 +18,12 @@ router.get('/', async (req, res) => {
     
     console.log('[Items API] 查询参数:', { type, status, search, page, limit, knowledge_base_id });
     
-    let sql = 'SELECT * FROM source_items WHERE 1=1';
+    // 优化：列表查询只返回必要字段，排除大文本字段（raw_content, page_content）
+    // 这些字段只在查看详情时加载
+    let sql = `SELECT id, type, title, original_url, summary_ai, source, tags, 
+               file_path, page_count, created_at, updated_at, status, 
+               knowledge_base_id, module_id 
+               FROM source_items WHERE 1=1`;
     const params = [];
 
     if (type && type !== 'all') {
@@ -60,21 +65,12 @@ router.get('/', async (req, res) => {
     
     console.log(`[Items API] 查询到 ${items.length} 条记录`);
 
-    // 解析tags JSON和page_content（如果是PDF）
+    // 解析tags JSON（不再解析page_content，因为列表查询不返回该字段）
     const itemsWithParsedTags = items.map(item => {
       const parsed = {
         ...item,
         tags: JSON.parse(item.tags || '[]')
       };
-      
-      // 如果是PDF类型，解析page_content
-      if (item.type === 'pdf' && item.page_content) {
-        try {
-          parsed.page_content = JSON.parse(item.page_content);
-        } catch (e) {
-          parsed.page_content = [];
-        }
-      }
       
       return parsed;
     });

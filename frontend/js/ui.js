@@ -349,12 +349,12 @@ function renderCards() {
     })
     .join('');
 
-  // 绑定点击
+  // 绑定点击事件
   elCardGrid.querySelectorAll('article[data-id]').forEach((card) => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', async () => {
       const id = card.getAttribute('data-id');
       const item = allItems.find((it) => it.id === id);
-      if (item) openDetail(item);
+      if (item) await openDetail(item);
     });
   });
 }
@@ -407,7 +407,7 @@ function renderRepoList() {
         return `
     <tr class="hover:bg-slate-50 transition-colors" data-id="${item.id}">
       <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900 cursor-pointer" onclick="window.openDetailById && window.openDetailById('${item.id}')">
-        ${truncate(item.title || '无标题', 28)}
+        ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
         文本
@@ -454,11 +454,11 @@ function renderRepoList() {
 
   // 绑定查看按钮
   elRepoList.querySelectorAll('[data-action="view"]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
       const item = allItems.find((it) => it.id === id);
-      if (item) openDetail(item);
+      if (item) await openDetail(item);
     });
   });
 
@@ -553,10 +553,11 @@ function renderArchiveList() {
 
   elArchiveList.innerHTML = data
     .map(
-      (item) => `
+      (item) => {
+        return `
     <tr class="hover:bg-slate-50 transition-colors" data-id="${item.id}">
       <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900 cursor-pointer" onclick="window.openDetailById && window.openDetailById('${item.id}')">
-        ${truncate(item.title || '无标题', 28)}
+        ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
         文本
@@ -593,17 +594,18 @@ function renderArchiveList() {
         </div>
       </td>
     </tr>
-  `
+  `;
+      }
     )
     .join('');
 
   // 绑定查看按钮
   elArchiveList.querySelectorAll('[data-action="view"]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
       const item = archivedItems.find((it) => it.id === id);
-      if (item) openDetail(item);
+      if (item) await openDetail(item);
     });
   });
 
@@ -698,13 +700,28 @@ function updateDashboardStats() {
 }
 
 // 暴露给全局，供表格行点击使用
-window.openDetailById = (id) => {
+window.openDetailById = async (id) => {
   // 先从活跃内容中查找，再从归档内容中查找
   let item = allItems.find((it) => it.id === id);
   if (!item) {
     item = archivedItems.find((it) => it.id === id);
   }
-  if (item) openDetail(item);
+  if (item) {
+    await openDetail(item);
+  } else {
+    // 如果本地没有找到，从API获取
+    try {
+      const res = await itemsAPI.getById(id);
+      if (res.success && res.data) {
+        await openDetail(res.data);
+      } else {
+        showToast('内容不存在', 'error');
+      }
+    } catch (error) {
+      console.error('加载详情失败:', error);
+      showToast('加载详情失败', 'error');
+    }
+  }
 };
 
 // 清除筛选
@@ -977,7 +994,26 @@ async function handleDeleteTag(tag) {
 
 // 打开详情
 let isEditing = false;
-function openDetail(item) {
+async function openDetail(item) {
+  // 如果item没有raw_content（列表查询不返回），需要从API获取完整数据
+  // 注意：对于PDF类型，即使没有raw_content也不从API获取，因为PDF内容很大
+  if (!item.raw_content && item.type !== 'pdf' && item.type !== 'link') {
+    try {
+      const res = await itemsAPI.getById(item.id);
+      if (res.success && res.data) {
+        item = res.data;
+        // 更新allItems中的对应项
+        const index = allItems.findIndex(it => it.id === item.id);
+        if (index !== -1) {
+          allItems[index] = item;
+        }
+      }
+    } catch (error) {
+      console.error('加载详情失败:', error);
+      // 如果加载失败，仍然显示基本信息，只是没有raw_content
+    }
+  }
+  
   currentItem = item;
   isEditing = false;
   elViewDetail.classList.remove('hidden');
@@ -1120,9 +1156,9 @@ function toggleEditMode() {
     const btnCancel = document.createElement('button');
     btnCancel.className = 'px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors ml-2';
     btnCancel.innerHTML = '<i class="fa-solid fa-xmark mr-1"></i> 取消';
-    btnCancel.addEventListener('click', () => {
+    btnCancel.addEventListener('click', async () => {
       isEditing = false;
-      openDetail(currentItem); // 重新加载详情
+      await openDetail(currentItem); // 重新加载详情
     });
     btnEdit.parentNode.insertBefore(btnCancel, btnEdit.nextSibling);
 
@@ -1163,7 +1199,7 @@ async function handleSaveEdit() {
     );
 
     isEditing = false;
-    openDetail(currentItem); // 重新渲染
+    await openDetail(currentItem); // 重新渲染
     renderCards();
     renderRepoList();
 
@@ -1477,7 +1513,7 @@ function showTagSelectionModal(itemId, suggestedTags) {
       
       if (currentItem && currentItem.id === itemId) {
         currentItem.tags = newTags;
-        openDetail(currentItem);
+        await openDetail(currentItem);
       }
       
       renderCards();
@@ -1574,7 +1610,7 @@ async function refreshItemAfterSummary(itemId) {
       // 如果当前正在查看该项，更新详情
       if (currentItem && currentItem.id === itemId) {
         currentItem = res.data;
-        openDetail(currentItem);
+        await openDetail(currentItem);
       }
       
       renderCards();
@@ -1663,6 +1699,7 @@ async function loadItems() {
     showToast(error.message || '加载内容失败', 'error');
   }
 }
+
 
 // 设置相关
 function openSettingsModal() {
@@ -1765,14 +1802,15 @@ async function testAPI() {
 
 // 事件绑定
 function bindEvents() {
-  // 导航
-  document.querySelectorAll('.nav-item').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
-      switchView(view);
-      if (window.innerWidth < 1024) toggleSidebar(false);
+  try {
+    // 导航
+    document.querySelectorAll('.nav-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const view = btn.dataset.view;
+        switchView(view);
+        if (window.innerWidth < 1024) toggleSidebar(false);
+      });
     });
-  });
 
   // 过滤
   if (elFilterContainer) {
@@ -1971,19 +2009,51 @@ function bindEvents() {
       }
     }
   });
+  } catch (error) {
+    console.error('事件绑定失败:', error);
+    console.error('错误堆栈:', error.stack);
+  }
 }
 
 async function init() {
-  bindEvents();
-  
-  // 从 localStorage 恢复上次的视图，如果没有则默认显示工作台
-  const lastView = storage.get('lastView', 'dashboard');
-  switchView(lastView);
-  
-  setFilter('all');
- // 初始化时设置为未加载
-  await loadSettings();
-  await loadItems();
+  try {
+    console.log('开始初始化应用...');
+    bindEvents();
+    console.log('事件绑定完成');
+    
+    // 从 localStorage 恢复上次的视图，如果没有则默认显示工作台
+    const lastView = storage.get('lastView', 'dashboard');
+    switchView(lastView);
+    console.log('视图切换完成:', lastView);
+    
+    setFilter('all');
+    console.log('筛选器设置完成');
+    
+    // 初始化时设置为未加载
+    try {
+      await loadSettings();
+      console.log('设置加载完成');
+    } catch (error) {
+      console.error('加载设置失败:', error);
+    }
+    
+    try {
+      await loadItems();
+      console.log('数据加载完成');
+    } catch (error) {
+      console.error('加载数据失败:', error);
+      // 即使加载失败，也要显示界面
+      if (elDashboardSubtitle) {
+        elDashboardSubtitle.textContent = '数据加载失败，请刷新页面重试';
+      }
+    }
+    
+    console.log('应用初始化完成');
+  } catch (error) {
+    console.error('初始化失败:', error);
+    console.error('错误堆栈:', error.stack);
+    alert('应用初始化失败，请刷新页面重试。错误信息: ' + error.message);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
