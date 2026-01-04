@@ -63,6 +63,16 @@ app.get('*', (req, res) => {
 // 检查并初始化数据库表
 async function ensureDatabaseInitialized() {
   try {
+    // 检查是PostgreSQL还是SQLite
+    const isPostgreSQL = !!db.pool;
+    
+    if (!isPostgreSQL) {
+      // SQLite数据库：表初始化已经在init-db.js中完成，这里跳过
+      console.log('✓ 使用SQLite数据库，表初始化已在init-db.js中完成');
+      return;
+    }
+
+    // PostgreSQL数据库：检查表是否存在
     const client = db.pool;
     if (!client) {
       throw new Error('Database pool not initialized');
