@@ -88,6 +88,7 @@ const elBtnOpenSettings = $('btn-open-settings');
 const elBtnCloseSettings = $('btn-close-settings');
 const elInputApiKey = $('input-api-key');
 const elSelectModel = $('select-model');
+const elToggleEvaluation = $('toggle-evaluation');
 const elBtnToggleApiKey = $('btn-toggle-api-key');
 const elBtnSaveSettings = $('btn-save-settings');
 const elBtnTestApi = $('btn-test-api');
@@ -1778,6 +1779,12 @@ async function loadSettings() {
     if (data.deepseek_model) {
       elSelectModel.value = data.deepseek_model;
     }
+
+    // 加载评估开关设置
+    if (elToggleEvaluation) {
+      const evaluationEnabled = data.enable_relevance_evaluation;
+      elToggleEvaluation.checked = evaluationEnabled === undefined || evaluationEnabled === 'true' || evaluationEnabled === true;
+    }
   } catch (error) {
     console.error('加载设置失败:', error);
   }
@@ -1786,9 +1793,10 @@ async function loadSettings() {
 async function saveSettings() {
   const apiKey = elInputApiKey.value.trim();
   const model = elSelectModel.value;
+  const enableRelevanceEvaluation = elToggleEvaluation ? elToggleEvaluation.checked : true;
 
   try {
-    await settingsAPI.update({ apiKey, model });
+    await settingsAPI.update({ apiKey, model, enableRelevanceEvaluation });
     elSettingsMessage.textContent = '设置已保存';
     elSettingsMessage.className = 'mt-3 text-xs text-green-600';
     apiConfigured = !!apiKey;

@@ -27,6 +27,11 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // 如果没有设置评估开关，默认返回true
+    if (result.enable_relevance_evaluation === undefined) {
+      result.enable_relevance_evaluation = 'true';
+    }
+
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('获取设置失败:', error);
@@ -37,7 +42,7 @@ router.get('/', async (req, res) => {
 // 更新设置
 router.put('/', async (req, res) => {
   try {
-    const { apiKey, model, darkMode } = req.body;
+    const { apiKey, model, darkMode, enableRelevanceEvaluation } = req.body;
 
     if (apiKey !== undefined) {
       // 验证API Key格式
@@ -70,6 +75,13 @@ router.put('/', async (req, res) => {
         ? 'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2'
         : 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)';
       await db.run(sql, ['dark_mode', darkMode.toString()]);
+    }
+
+    if (enableRelevanceEvaluation !== undefined) {
+      const sql = process.env.DATABASE_URL 
+        ? 'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2'
+        : 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)';
+      await db.run(sql, ['enable_relevance_evaluation', enableRelevanceEvaluation.toString()]);
     }
 
     res.json({ success: true, message: '设置已保存' });

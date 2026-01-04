@@ -183,6 +183,28 @@ export async function initConsultation() {
     // 绑定上传按钮事件监听器
     setupUploadButton();
     
+    // 绑定评估快速开关
+    const toggleEvaluationQuick = document.getElementById('toggle-evaluation-quick');
+    if (toggleEvaluationQuick) {
+      // 初始化图标状态
+      updateEvaluationQuickToggle();
+      
+      toggleEvaluationQuick.addEventListener('click', () => {
+        const currentValue = localStorage.getItem('knowledge_relevance_evaluation_enabled');
+        const newValue = currentValue === 'true' ? 'false' : 'true';
+        localStorage.setItem('knowledge_relevance_evaluation_enabled', newValue);
+        updateEvaluationQuickToggle();
+        
+        // 显示提示
+        const status = newValue === 'true' ? '已启用' : '已禁用';
+        const toast = document.createElement('div');
+        toast.className = 'fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm';
+        toast.textContent = `相关性评估${status}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      });
+    }
+    
     // 绑定对话历史搜索输入框事件监听器
     const searchInput = document.getElementById('conversation-history-search');
     if (searchInput) {
@@ -196,6 +218,8 @@ export async function initConsultation() {
     // 延迟一点确保DOM已准备好
     setTimeout(async () => {
       await renderConversationHistory();
+      // 初始化评估快速开关状态
+      updateEvaluationQuickToggle();
     }, 100);
   } catch (error) {
     console.error('加载PDF列表失败:', error);
@@ -1144,6 +1168,13 @@ export async function handleConversation(text) {
   try {
     let fullResponse = '';
     let allCitations = [];
+    let evaluationResult = null;
+    
+    // 获取评估开关状态
+    const sessionEvaluationEnabled = localStorage.getItem('knowledge_relevance_evaluation_enabled');
+    const enableEvaluation = sessionEvaluationEnabled !== null 
+      ? sessionEvaluationEnabled === 'true' 
+      : null; // null表示使用全局设置
     
     // 创建AI消息占位符，显示加载状态
     responseEl = addAiMessage('正在思考...', true, []);
@@ -1157,8 +1188,18 @@ export async function handleConversation(text) {
       context,
       state.currentDocInfo,
       (chunk) => {
-        // chunk 应该总是一个对象 { content, citations }
+        // chunk 应该总是一个对象 { content, citations, evaluation }
         if (chunk && typeof chunk === 'object') {
+          // 处理评估结果
+          if (chunk.evaluation) {
+            evaluationResult = chunk.evaluation;
+            // 更新消息显示，添加评估结果
+            if (responseEl) {
+              updateAiMessage(responseEl, fullResponse, allCitations, evaluationResult);
+            }
+            return;
+          }
+          
           // 累积内容
           if (chunk.content) {
             fullResponse += chunk.content;
@@ -1188,10 +1229,11 @@ export async function handleConversation(text) {
           
           // 实时更新消息显示
           if (responseEl) {
-            updateAiMessage(responseEl, fullResponse, allCitations);
+            updateAiMessage(responseEl, fullResponse, allCitations, evaluationResult);
           }
         }
-      }
+      },
+      enableEvaluation
     );
     
     // 流式完成，移除光标，添加操作按钮
@@ -1234,6 +1276,7 @@ export async function handleConversation(text) {
       role: 'assistant', 
       content: fullResponse, 
       citations: allCitations,
+      evaluation: evaluationResult, // 保存评估结果
       docId: state.currentDocId // 保存文档ID
     });
     await saveHistory();
@@ -1412,6 +1455,96 @@ function renderCitations(citations, messageId) {
   `;
 }
 
+// 渲染评估结果
+function renderEvaluation(evaluation, messageId) {
+  if (!evaluation) return '';
+  
+  const overallScore = evaluation.overallScore || 0;
+  const textSimilarity = evaluation.textSimilarity || {};
+  const citationValidation = evaluation.citationValidation || {};
+  const aiEvaluation = evaluation.aiEvaluation || {};
+  
+  // 根据分数确定颜色
+  let scoreColor = 'text-red-600';
+  let scoreBg = 'bg-red-50';
+  let scoreBorder = 'border-red-200';
+  if (overallScore >= 80) {
+    scoreColor = 'text-green-600';
+    scoreBg = 'bg-green-50';
+    scoreBorder = 'border-green-200';
+  } else if (overallScore >= 60) {
+    scoreColor = 'text-yellow-600';
+    scoreBg = 'bg-yellow-50';
+    scoreBorder = 'border-yellow-200';
+  }
+  
+  // 警告提示
+  const showWarning = overallScore < 60;
+  
+  return `
+    <div class="evaluation-area mb-3" data-message-id="${messageId}">
+      <div class="evaluation-header flex items-center justify-between cursor-pointer" onclick="toggleEvaluationDetails('${messageId}')">
+        <div class="flex items-center gap-2">
+          <i data-lucide="bar-chart-2" size="14" class="text-slate-400"></i>
+          <span class="text-xs font-medium text-slate-700">相关性评估</span>
+          <span class="evaluation-score-badge px-2 py-0.5 rounded-full text-xs font-semibold ${scoreColor} ${scoreBg} ${scoreBorder} border">
+            ${overallScore}分
+          </span>
+          ${showWarning ? '<span class="text-xs text-red-600">⚠️ 相关性较低</span>' : ''}
+        </div>
+        <i data-lucide="chevron-down" size="14" class="text-slate-400 evaluation-chevron"></i>
+      </div>
+      <div class="evaluation-details hidden mt-2 p-3 bg-slate-50 rounded-lg text-xs space-y-2" id="evaluation-details-${messageId}">
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-slate-500">文本相似度:</span>
+            <span class="font-medium text-slate-700 ml-1">${Math.round(textSimilarity.similarity || 0)}%</span>
+          </div>
+          <div>
+            <span class="text-slate-500">内容匹配度:</span>
+            <span class="font-medium text-slate-700 ml-1">${Math.round(textSimilarity.contentRatio || 0)}%</span>
+          </div>
+          <div>
+            <span class="text-slate-500">引用准确性:</span>
+            <span class="font-medium text-slate-700 ml-1">
+              ${citationValidation.totalCount > 0 
+                ? `${citationValidation.validCount}/${citationValidation.totalCount}` 
+                : '无引用'}
+            </span>
+          </div>
+          <div>
+            <span class="text-slate-500">AI评估:</span>
+            <span class="font-medium text-slate-700 ml-1">${Math.round(aiEvaluation.relevanceScore || 0)}%</span>
+          </div>
+        </div>
+        ${aiEvaluation.explanation ? `
+          <div class="pt-2 border-t border-slate-200">
+            <span class="text-slate-500">评估说明:</span>
+            <p class="text-slate-600 mt-1">${escapeHtml(aiEvaluation.explanation)}</p>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// 切换评估详情显示
+window.toggleEvaluationDetails = function(messageId) {
+  const detailsEl = document.getElementById(`evaluation-details-${messageId}`);
+  const chevronEl = document.querySelector(`[data-message-id="${messageId}"] .evaluation-chevron`);
+  if (detailsEl) {
+    detailsEl.classList.toggle('hidden');
+    if (chevronEl && window.lucide) {
+      if (detailsEl.classList.contains('hidden')) {
+        chevronEl.setAttribute('data-lucide', 'chevron-down');
+      } else {
+        chevronEl.setAttribute('data-lucide', 'chevron-up');
+      }
+      lucide.createIcons(chevronEl);
+    }
+  }
+};
+
 // 渲染消息操作按钮
 function renderMessageActions(messageId) {
   return `
@@ -1432,10 +1565,38 @@ function bindMessageActions(element) {
 }
 
 // 更新AI消息（流式）
-function updateAiMessage(element, content, citations = []) {
+function updateAiMessage(element, content, citations = [], evaluation = null) {
   if (!element) return;
   
   const messageId = element.getAttribute('data-message-id');
+  
+  // 更新评估结果区域
+  const evaluationArea = element.querySelector('.evaluation-area');
+  if (evaluation) {
+    const evaluationHtml = renderEvaluation(evaluation, messageId);
+    if (evaluationArea) {
+      evaluationArea.outerHTML = evaluationHtml;
+      if (window.lucide) lucide.createIcons(element);
+    } else {
+      // 插入评估区域（在引用区域之后）
+      const msgContainer = element.querySelector('.space-y-1');
+      if (msgContainer) {
+        const citationsArea = msgContainer.querySelector('.citations-area');
+        if (citationsArea) {
+          citationsArea.insertAdjacentHTML('afterend', evaluationHtml);
+        } else {
+          const badgeEl = msgContainer.querySelector('.flex.items-center');
+          if (badgeEl) {
+            badgeEl.insertAdjacentHTML('afterend', evaluationHtml);
+          }
+        }
+        if (window.lucide) lucide.createIcons(element);
+      }
+    }
+  } else if (evaluationArea) {
+    // 如果没有评估结果，移除评估区域
+    evaluationArea.remove();
+  }
   
   // 更新引用区域
   const citationsArea = element.querySelector('.citations-area');
@@ -3894,4 +4055,28 @@ window.showDocContextMenu = function(event, docId) {
     document.addEventListener('click', closeMenu);
   }, 10);
 };
+
+// 更新评估快速开关的图标状态
+function updateEvaluationQuickToggle() {
+  const toggleBtn = document.getElementById('toggle-evaluation-quick');
+  const iconEl = document.getElementById('evaluation-icon');
+  if (!toggleBtn || !iconEl) return;
+  
+  const sessionValue = localStorage.getItem('knowledge_relevance_evaluation_enabled');
+  const isEnabled = sessionValue === null || sessionValue === 'true'; // 默认启用
+  
+  if (isEnabled) {
+    toggleBtn.classList.remove('text-slate-400');
+    toggleBtn.classList.add('text-indigo-600', 'bg-indigo-50');
+    iconEl.setAttribute('data-lucide', 'bar-chart-2');
+  } else {
+    toggleBtn.classList.remove('text-indigo-600', 'bg-indigo-50');
+    toggleBtn.classList.add('text-slate-400');
+    iconEl.setAttribute('data-lucide', 'bar-chart-2');
+  }
+  
+  if (window.lucide) {
+    lucide.createIcons(iconEl);
+  }
+}
 

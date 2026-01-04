@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 const { consultantChat, extractCitations, analyzeDocument, matchDocument, generateWelcomeMessage } = require('../services/ai');
+const { evaluateRelevance } = require('../services/relevance-evaluator');
 
 // 分析文档主题和分类
 router.post('/analyze-document', async (req, res) => {
@@ -173,10 +174,21 @@ router.post('/welcome-message', async (req, res) => {
 // 咨询对话接口（流式响应）
 router.post('/chat', async (req, res) => {
   try {
-    const { messages, docId, context, docInfo } = req.body;
+    const { messages, docId, context, docInfo, enableEvaluation } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: '消息不能为空' });
+    }
+
+    // 检查评估开关状态
+    let shouldEvaluate = false;
+    if (enableEvaluation !== undefined) {
+      // 请求级别优先
+      shouldEvaluate = enableEvaluation === true || enableEvaluation === 'true';
+    } else {
+      // 检查全局设置
+      const setting = await db.get('SELECT value FROM settings WHERE key = ?', ['enable_relevance_evaluation']);
+      shouldEvaluate = !setting || setting.value === 'true' || setting.value === true;
     }
 
     // 获取PDF内容（如果提供了docId）
@@ -223,6 +235,9 @@ router.post('/chat', async (req, res) => {
     
     // 获取文档信息用于设置引用
     const docTitle = docInfo?.title || null;
+    
+    // 获取用户问题（用于评估）
+    const userQuestion = messages.length > 0 ? messages[messages.length - 1].content : null;
 
     try {
       while (true) {
@@ -233,6 +248,39 @@ router.post('/chat', async (req, res) => {
           if (citations.length > 0) {
             res.write(`data: ${JSON.stringify({ content: '', citations: citations })}\n\n`);
           }
+          
+          // 如果启用评估，执行评估
+          if (shouldEvaluate && fullContent && pdfContent) {
+            try {
+              // 获取分页内容用于引用验证
+              let pageContent = null;
+              if (docId) {
+                const item = await db.get('SELECT page_content FROM source_items WHERE id = ? AND type = ?', [docId, 'pdf']);
+                if (item && item.page_content) {
+                  pageContent = item.page_content;
+                }
+              }
+              
+              // 异步执行评估，不阻塞响应
+              evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion)
+                .then(evaluationResult => {
+                  // 评估完成后，通过新的SSE事件发送结果
+                  // 注意：此时响应可能已经关闭，需要处理错误
+                  try {
+                    res.write(`data: ${JSON.stringify({ evaluation: evaluationResult })}\n\n`);
+                  } catch (e) {
+                    console.warn('发送评估结果失败（响应已关闭）:', e);
+                  }
+                })
+                .catch(evalError => {
+                  console.error('评估过程出错:', evalError);
+                  // 评估失败不影响主流程
+                });
+            } catch (evalError) {
+              console.error('启动评估失败:', evalError);
+            }
+          }
+          
           res.write('data: [DONE]\n\n');
           break;
         }
@@ -282,6 +330,37 @@ router.post('/chat', async (req, res) => {
                   if (citations.length > 0) {
                     res.write(`data: ${JSON.stringify({ content: '', citations: citations })}\n\n`);
                   }
+                  
+                  // 如果启用评估，执行评估
+                  if (shouldEvaluate && fullContent && pdfContent) {
+                    try {
+                      // 获取分页内容用于引用验证
+                      let pageContent = null;
+                      if (docId) {
+                        const item = await db.get('SELECT page_content FROM source_items WHERE id = ? AND type = ?', [docId, 'pdf']);
+                        if (item && item.page_content) {
+                          pageContent = item.page_content;
+                        }
+                      }
+                      
+                      // 异步执行评估，不阻塞响应
+                      evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion)
+                        .then(evaluationResult => {
+                          // 评估完成后，通过新的SSE事件发送结果
+                          try {
+                            res.write(`data: ${JSON.stringify({ evaluation: evaluationResult })}\n\n`);
+                          } catch (e) {
+                            console.warn('发送评估结果失败（响应已关闭）:', e);
+                          }
+                        })
+                        .catch(evalError => {
+                          console.error('评估过程出错:', evalError);
+                        });
+                    } catch (evalError) {
+                      console.error('启动评估失败:', evalError);
+                    }
+                  }
+                  
                   res.write('data: [DONE]\n\n');
                   break;
                 }

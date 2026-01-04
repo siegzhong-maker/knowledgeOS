@@ -234,11 +234,23 @@ export const consultationAPI = {
   },
   
   // 咨询对话
-  chat: async (messages, docId, context, docInfo, onChunk) => {
+  chat: async (messages, docId, context, docInfo, onChunk, enableEvaluation = null) => {
+    // 如果enableEvaluation为null，从localStorage读取会话级设置，否则使用传入的值
+    let shouldEvaluate = enableEvaluation;
+    if (shouldEvaluate === null) {
+      const sessionSetting = localStorage.getItem('knowledge_relevance_evaluation_enabled');
+      if (sessionSetting !== null) {
+        shouldEvaluate = sessionSetting === 'true';
+      } else {
+        // 如果没有会话级设置，从全局设置读取（需要先获取，这里先设为undefined让后端处理）
+        shouldEvaluate = undefined;
+      }
+    }
+    
     const response = await fetch(`${API_BASE}/consultation/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, docId, context, docInfo })
+      body: JSON.stringify({ messages, docId, context, docInfo, enableEvaluation: shouldEvaluate })
     });
 
     if (!response.ok) {
@@ -264,6 +276,7 @@ export const consultationAPI = {
     const decoder = new TextDecoder();
     let fullContent = '';
     let citations = [];
+    let evaluationResult = null;
 
     try {
       while (true) {
@@ -279,7 +292,7 @@ export const consultationAPI = {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
             if (data === '[DONE]') {
-              return { content: fullContent, citations };
+              return { content: fullContent, citations, evaluation: evaluationResult };
             }
             
             // 检查是否是错误消息
@@ -298,6 +311,15 @@ export const consultationAPI = {
             
             try {
               const json = JSON.parse(data);
+              
+              // 处理评估结果
+              if (json.evaluation) {
+                evaluationResult = json.evaluation;
+                if (onChunk) {
+                  onChunk({ evaluation: json.evaluation });
+                }
+                continue;
+              }
               
               // 处理内容
               if (json.content !== undefined) {
@@ -342,7 +364,7 @@ export const consultationAPI = {
       reader.releaseLock();
     }
     
-    return { content: fullContent, citations };
+    return { content: fullContent, citations, evaluation: evaluationResult };
   }
 };
 

@@ -365,6 +365,60 @@
     #right-panel-content {
       position: relative;
     }
+    
+    /* 评估结果样式 */
+    .evaluation-area {
+      margin-bottom: 0.75rem;
+    }
+    
+    .evaluation-header {
+      padding: 0.5rem 0.75rem;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.5rem;
+      transition: all 0.2s;
+    }
+    
+    .evaluation-header:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+    }
+    
+    .evaluation-score-badge {
+      font-weight: 600;
+      font-size: 0.75rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid;
+    }
+    
+    .evaluation-details {
+      font-size: 0.75rem;
+      padding: 0.75rem;
+      background: #f8fafc;
+      border-radius: 0.5rem;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 0.5rem;
+    }
+    
+    .evaluation-details .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+    }
+    
+    .evaluation-chevron {
+      transition: transform 0.2s;
+    }
+    
+    /* 评估快速开关样式 */
+    #toggle-evaluation-quick {
+      transition: all 0.2s;
+    }
+    
+    #toggle-evaluation-quick:hover {
+      transform: scale(1.05);
+    }
   </style>
 </head>
 <body class="text-slate-800 h-screen overflow-hidden flex">
@@ -1011,7 +1065,15 @@
                 </button>
               </div>
               <!-- 输入框和发送按钮 -->
-              <div class="flex items-center px-1 pb-1">
+              <div class="flex items-center px-1 pb-1 gap-2">
+                <!-- 评估开关（快速切换） -->
+                <button
+                  id="toggle-evaluation-quick"
+                  class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors flex-shrink-0"
+                  title="切换相关性评估"
+                >
+                  <i data-lucide="bar-chart-2" size="18" id="evaluation-icon"></i>
+                </button>
                 <textarea
                   id="chat-input"
                   rows="1"
@@ -1202,6 +1264,17 @@
             <option value="deepseek-chat">deepseek-chat（推荐）</option>
             <option value="deepseek-coder">deepseek-coder</option>
           </select>
+        </div>
+
+        <div class="flex items-center justify-between py-3 border-t">
+          <div>
+            <p class="text-sm font-medium text-slate-900">启用回答相关性评估</p>
+            <p class="text-xs text-slate-500">评估AI回答是否真正基于知识库内容</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="toggle-evaluation" class="sr-only peer" checked>
+            <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
         </div>
 
         <div class="flex items-center justify-between py-3 border-t">

@@ -10,38 +10,88 @@
 
 ## 配置步骤
 
-### 1. 在Railway中创建Volume
+### 重要：Volume配置在服务级别，不是项目级别
 
-1. 登录 [Railway Dashboard](https://railway.app)
-2. 进入你的项目
-3. 选择你的Web服务（knowledge-manager）
-4. 点击 **"Settings"** 标签
-5. 滚动到 **"Volumes"** 部分
-6. 点击 **"+ New Volume"**
-7. 配置Volume：
-   - **Mount Path**: `/data/uploads`
-   - **Name**: `uploads` (可选，用于标识)
-8. 点击 **"Add"** 保存
+**关键区别**：
+- **项目（Project）Settings**：在项目设置页面（你现在的位置），这里配置的是项目级别的设置
+- **服务（Service）Settings**：在具体服务的设置页面，Volume配置在这里
 
-### 2. 配置环境变量（可选）
+### 正确的配置步骤
+
+1. **进入服务页面**
+   - 在Railway项目页面，你应该看到你的服务列表（比如 "knowledge-manager" 或类似名称）
+   - **点击你的Web服务名称**（不是项目名称）
+   - 这会带你进入服务详情页面
+
+2. **进入服务的Settings**
+   - 在服务页面的顶部导航栏中，点击 **"Settings"** 标签
+   - 注意：这是服务级别的Settings，不是项目级别的
+
+3. **找到Volumes部分**
+   - 在服务的Settings页面中，向下滚动
+   - 找到 **"Volumes"** 部分（通常在页面中下部）
+   - 如果看不到Volumes部分，可能是因为：
+     - 你的Railway计划不支持Volumes（免费计划支持）
+     - 页面需要刷新
+
+4. **创建Volume**
+   - 点击 **"+ New Volume"** 按钮
+   - 配置Volume：
+     - **Mount Path**: `/data/uploads`
+     - **Name**: `uploads` (可选，用于标识)
+   - 点击 **"Add"** 保存
+
+### 详细步骤图示说明
+
+```
+Railway Dashboard
+  └─ 你的项目 (generous-enthusiasm)
+      └─ 服务列表
+          └─ [点击] Web服务 (knowledge-manager 或类似名称)  ← 这里！
+              └─ 服务详情页面
+                  └─ 顶部导航栏
+                      └─ [点击] Settings  ← 服务级别的Settings
+                          └─ 向下滚动
+                              └─ Volumes 部分
+                                  └─ + New Volume
+```
+
+### 如果找不到服务页面
+
+如果你只看到项目设置页面，说明你需要：
+
+1. **返回项目主页**
+   - 点击页面左上角的项目名称或返回按钮
+   - 或者从左侧菜单返回到项目主页
+
+2. **找到服务列表**
+   - 在项目主页，你应该能看到所有服务
+   - 通常会有：
+     - Web服务（你的应用）
+     - PostgreSQL服务（数据库）
+   - 点击Web服务进入服务详情
+
+3. **然后按照上面的步骤2-4操作**
+
+### 环境变量配置（可选）
 
 如果Volume挂载点不是`/data/uploads`，可以通过环境变量自定义：
 
-1. 在Railway服务页面，点击 **"Variables"** 标签
+1. **在服务页面**（不是项目页面），点击 **"Variables"** 标签
 2. 点击 **"+ New Variable"**
 3. 添加变量：
    - **Key**: `UPLOADS_PATH`
    - **Value**: `/data/uploads` (或你的Volume挂载路径)
 4. 点击 **"Add"** 保存
 
-### 3. 验证配置
+### 验证配置
 
 部署后，检查日志应该看到：
 ```
 ✓ 上传目录已准备: /data/uploads
 ```
 
-### 4. 迁移现有文件（如果需要）
+### 迁移现有文件（如果需要）
 
 如果你有现有的PDF文件在临时目录中，需要手动迁移：
 
@@ -66,8 +116,20 @@
 1. **Volume大小限制**：Railway免费计划可能有Volume大小限制，请查看Railway文档
 2. **备份**：虽然Volume是持久化的，但建议定期备份重要文件
 3. **路径一致性**：确保所有服务使用相同的路径配置
+4. **服务级别配置**：Volume是服务级别的配置，每个服务需要单独配置
 
 ## 故障排查
+
+### 问题：找不到Volumes选项
+
+**可能原因1：在项目设置页面而不是服务设置页面**
+- **解决**：确保你点击的是**服务名称**，然后在服务页面的Settings中查找
+
+**可能原因2：Railway计划不支持**
+- **解决**：检查你的Railway计划，免费计划应该支持Volumes
+
+**可能原因3：页面需要刷新**
+- **解决**：刷新页面或清除浏览器缓存
 
 ### 问题：文件仍然丢失
 
@@ -92,4 +154,4 @@
 - `backend/routes/upload.js`: PDF上传路由
 - `backend/routes/files.js`: PDF文件服务路由
 - `backend/server.js`: 服务器启动文件（包含启动检查）
-
+- `DEPLOY_CHECKLIST.md`: 部署检查清单
