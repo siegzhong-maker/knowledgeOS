@@ -957,9 +957,14 @@
             <thead class="bg-slate-50">
               <tr>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="title"
+                  id="repo-sort-title"
                 >
-                  标题
+                  <div class="flex items-center gap-1">
+                    标题
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
                 </th>
                 <th
                   class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
@@ -967,9 +972,24 @@
                   类型
                 </th>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="created_at"
+                  id="repo-sort-created"
                 >
-                  添加时间
+                  <div class="flex items-center gap-1">
+                    添加时间
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
+                </th>
+                <th
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="page_count"
+                  id="repo-sort-pages"
+                >
+                  <div class="flex items-center gap-1">
+                    页数
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
                 </th>
                 <th
                   class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
@@ -988,6 +1008,15 @@
               id="repo-list"
             ></tbody>
           </table>
+          <div class="p-4 border-t border-slate-100 flex justify-between items-center">
+            <span class="text-xs text-slate-500" id="repo-count-info">已加载 0/0</span>
+            <button
+              id="btn-load-more-repo"
+              class="px-4 py-2 text-sm text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors hidden"
+            >
+              加载更多
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1017,9 +1046,14 @@
             <thead class="bg-slate-50">
               <tr>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="title"
+                  id="archive-sort-title"
                 >
-                  标题
+                  <div class="flex items-center gap-1">
+                    标题
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
                 </th>
                 <th
                   class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
@@ -1027,9 +1061,24 @@
                   类型
                 </th>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="updated_at"
+                  id="archive-sort-time"
                 >
-                  归档时间
+                  <div class="flex items-center gap-1">
+                    归档时间
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
+                </th>
+                <th
+                  class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
+                  data-sort="page_count"
+                  id="archive-sort-pages"
+                >
+                  <div class="flex items-center gap-1">
+                    页数
+                    <i class="fa-solid fa-sort text-slate-400 text-[10px]"></i>
+                  </div>
                 </th>
                 <th
                   class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
@@ -1043,6 +1092,15 @@
               id="archive-list"
             ></tbody>
           </table>
+          <div class="p-4 border-t border-slate-100 flex justify-between items-center">
+            <span class="text-xs text-slate-500" id="archive-count-info">已加载 0/0</span>
+            <button
+              id="btn-load-more-archive"
+              class="px-4 py-2 text-sm text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors hidden"
+            >
+              加载更多
+            </button>
+          </div>
         </div>
       </section>
 

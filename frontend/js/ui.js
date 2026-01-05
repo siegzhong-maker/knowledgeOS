@@ -65,6 +65,10 @@ let currentFilter = 'all';
 let currentView = 'dashboard';
 let currentStatusFilter = 'all'; // 用于知识库页面的状态筛选
 let currentItem = null;
+let repoSortBy = 'created_at'; // 知识库排序字段：title, created_at, page_count
+let repoSortOrder = 'desc'; // 排序方向：asc, desc
+let archiveSortBy = 'updated_at'; // 归档排序字段：title, updated_at, page_count
+let archiveSortOrder = 'desc'; // 排序方向：asc, desc
 let apiConfigured = false;
 let globalSearchTerm = '';
 let stats = null;
@@ -239,10 +243,12 @@ function switchView(view) {
     elViewRepository.classList.remove('hidden');
     // 切换到知识库时重新加载数据
     loadItems();
+    setTimeout(() => updateSortIcons('repo'), 100);
   }
   if (view === 'archive') {
     elViewArchive.classList.remove('hidden');
     loadArchivedItems();
+    setTimeout(() => updateSortIcons('archive'), 100);
   }
   if (view === 'tags') elViewTags.classList.remove('hidden');
 
@@ -405,6 +411,27 @@ function renderRepoList() {
         (item.summary_ai && item.summary_ai.includes(search))
     );
   }
+  
+  // 排序
+  data.sort((a, b) => {
+    let aVal, bVal;
+    if (repoSortBy === 'title') {
+      aVal = (a.title || '').toLowerCase();
+      bVal = (b.title || '').toLowerCase();
+    } else if (repoSortBy === 'page_count') {
+      aVal = a.page_count || 0;
+      bVal = b.page_count || 0;
+    } else { // created_at
+      aVal = a.created_at || 0;
+      bVal = b.created_at || 0;
+    }
+    
+    if (repoSortOrder === 'asc') {
+      return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+    } else {
+      return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+    }
+  });
 
   if (data.length === 0) {
     elRepoList.innerHTML = `
@@ -437,10 +464,16 @@ function renderRepoList() {
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
-        文本
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-file-pdf text-red-600"></i>
+          <span>PDF${item.page_count ? ` (${item.page_count} 页)` : ''}</span>
+        </div>
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
         ${formatTime(item.created_at)}
+      </td>
+      <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
+        ${item.page_count || 0} 页
       </td>
       <td class="px-6 py-3 whitespace-nowrap">
         ${statusBadge}
@@ -495,11 +528,32 @@ function renderArchiveList() {
         (item.summary_ai && item.summary_ai.includes(search))
     );
   }
+  
+  // 排序
+  data.sort((a, b) => {
+    let aVal, bVal;
+    if (archiveSortBy === 'title') {
+      aVal = (a.title || '').toLowerCase();
+      bVal = (b.title || '').toLowerCase();
+    } else if (archiveSortBy === 'page_count') {
+      aVal = a.page_count || 0;
+      bVal = b.page_count || 0;
+    } else { // updated_at
+      aVal = a.updated_at || a.created_at || 0;
+      bVal = b.updated_at || b.created_at || 0;
+    }
+    
+    if (archiveSortOrder === 'asc') {
+      return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+    } else {
+      return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+    }
+  });
 
   if (data.length === 0) {
     elArchiveList.innerHTML = `
       <tr>
-        <td colspan="4" class="px-6 py-12 text-center text-slate-400">
+        <td colspan="5" class="px-6 py-12 text-center text-slate-400">
           <i class="fa-solid fa-archive text-3xl mb-2"></i>
           <p>归档为空，整理你的知识库吧</p>
         </td>
@@ -517,10 +571,16 @@ function renderArchiveList() {
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
-        文本
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-file-pdf text-red-600"></i>
+          <span>PDF${item.page_count ? ` (${item.page_count} 页)` : ''}</span>
+        </div>
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
         ${formatTime(item.updated_at || item.created_at)}
+      </td>
+      <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
+        ${item.page_count || 0} 页
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-sm">
         <div class="flex items-center gap-2">
@@ -559,16 +619,99 @@ function renderArchiveList() {
   // 事件委托已在bindEvents中设置，无需重复绑定
 }
 
+// 更新排序图标
+function updateSortIcons(type) {
+  const prefix = type === 'repo' ? 'repo-sort-' : 'archive-sort-';
+  const sortBy = type === 'repo' ? repoSortBy : archiveSortBy;
+  const sortOrder = type === 'repo' ? repoSortOrder : archiveSortOrder;
+  
+  // 清除所有排序图标
+  document.querySelectorAll(`[id^="${prefix}"] i`).forEach(icon => {
+    icon.className = 'fa-solid fa-sort text-slate-400 text-[10px]';
+  });
+  
+  // 设置当前排序字段的图标
+  let sortId = '';
+  if (sortBy === 'created_at') {
+    sortId = 'created';
+  } else if (sortBy === 'updated_at') {
+    sortId = 'time';
+  } else {
+    sortId = sortBy;
+  }
+  
+  const currentTh = document.getElementById(`${prefix}${sortId}`);
+  if (currentTh) {
+    const icon = currentTh.querySelector('i');
+    if (icon) {
+      if (sortOrder === 'asc') {
+        icon.className = 'fa-solid fa-sort-up text-indigo-600 text-[10px]';
+      } else {
+        icon.className = 'fa-solid fa-sort-down text-indigo-600 text-[10px]';
+      }
+    }
+  }
+}
+
 // 加载归档内容（使用分页）
-async function loadArchivedItems() {
+async function loadArchivedItems(reset = true) {
   try {
     // 使用合理的分页大小
-    const res = await itemsAPI.getAll({ status: 'archived', page: 1, limit: 100 });
-    archivedItems = res.data || [];
+    const pageSize = 50;
+    
+    if (reset) {
+      archiveCurrentPage = 1;
+      archivedItems = [];
+      archiveLoadedCount = 0;
+    }
+    
+    const res = await itemsAPI.getAll({ status: 'archived', page: archiveCurrentPage, limit: pageSize });
+    
+    const newItems = res.data || [];
+    archivedItems = reset ? newItems : [...archivedItems, ...newItems];
+    
+    archiveTotalCount = res.total || archivedItems.length;
+    archiveLoadedCount = archivedItems.length;
+    const hasMore = res.hasMore || (archiveLoadedCount < archiveTotalCount);
+    
+    console.log(`加载了 ${newItems.length} 个归档项目，已加载 ${archiveLoadedCount}/${archiveTotalCount}`);
+    
     renderArchiveList();
+    
+    // 更新加载更多按钮状态
+    updateLoadMoreButton('archive', hasMore);
   } catch (error) {
     console.error('加载归档内容失败:', error);
     showToast(error.message || '加载归档内容失败', 'error');
+  }
+}
+
+// 加载更多归档项目
+async function loadMoreArchivedItems() {
+  archiveCurrentPage++;
+  await loadArchivedItems(false);
+}
+
+// 更新加载更多按钮
+function updateLoadMoreButton(type, hasMore) {
+  const buttonId = type === 'repo' ? 'btn-load-more-repo' : 'btn-load-more-archive';
+  const countId = type === 'repo' ? 'repo-count-info' : 'archive-count-info';
+  const button = document.getElementById(buttonId);
+  const countInfo = document.getElementById(countId);
+  
+  if (countInfo) {
+    const loaded = type === 'repo' ? repoLoadedCount : archiveLoadedCount;
+    const total = type === 'repo' ? repoTotalCount : archiveTotalCount;
+    countInfo.textContent = `已加载 ${loaded}/${total}`;
+  }
+  
+  if (button) {
+    if (hasMore) {
+      button.classList.remove('hidden');
+      button.disabled = false;
+    } else {
+      button.classList.add('hidden');
+    }
   }
 }
 
@@ -1571,7 +1714,7 @@ async function handleQuickInputKeydown(e) {
 
 // 加载 items（默认排除archived）
 // 使用分页加载以提高性能
-async function loadItems() {
+async function loadItems(reset = true) {
   try {
     // 显示加载状态
     if (elDashboardSubtitle) {
@@ -1580,22 +1723,29 @@ async function loadItems() {
     
     // 使用合理的分页大小（50条记录）
     const pageSize = 50;
-    const res = await itemsAPI.getAll({ type: 'all', page: 1, limit: pageSize });
     
-    allItems = res.data || [];
-    const total = res.total || allItems.length;
-    const hasMore = res.hasMore || false;
-    
-    console.log(`加载了 ${allItems.length} 个项目，总计 ${total} 个${hasMore ? '（还有更多）' : ''}`);
-    
-    // 如果有更多数据，可以考虑实现"加载更多"功能
-    // 目前先加载第一页，如果需要可以后续添加
-    if (hasMore && total > pageSize) {
-      console.log(`提示：还有 ${total - pageSize} 个项目未加载，考虑实现分页或搜索功能`);
+    if (reset) {
+      repoCurrentPage = 1;
+      allItems = [];
+      repoLoadedCount = 0;
     }
+    
+    const res = await itemsAPI.getAll({ type: 'all', page: repoCurrentPage, limit: pageSize });
+    
+    const newItems = res.data || [];
+    allItems = reset ? newItems : [...allItems, ...newItems];
+    
+    repoTotalCount = res.total || allItems.length;
+    repoLoadedCount = allItems.length;
+    const hasMore = res.hasMore || (repoLoadedCount < repoTotalCount);
+    
+    console.log(`加载了 ${newItems.length} 个项目，已加载 ${repoLoadedCount}/${repoTotalCount}`);
     
     scheduleRender(['cards', 'repoList', 'tagsCloud']);
     await loadDashboardStats();
+    
+    // 更新加载更多按钮状态
+    updateLoadMoreButton('repo', hasMore);
   } catch (error) {
     console.error('加载内容失败:', error);
     if (elDashboardSubtitle) {
@@ -1603,6 +1753,12 @@ async function loadItems() {
     }
     showToast(error.message || '加载内容失败', 'error');
   }
+}
+
+// 加载更多知识库项目
+async function loadMoreItems() {
+  repoCurrentPage++;
+  await loadItems(false);
 }
 
 
@@ -2226,12 +2382,55 @@ function bindEvents() {
       renderRepoList();
     });
   }
+  
+  // 知识库排序
+  document.querySelectorAll('[id^="repo-sort-"]').forEach(th => {
+    th.addEventListener('click', () => {
+      const sortField = th.dataset.sort;
+      if (repoSortBy === sortField) {
+        // 同一字段，切换排序方向
+        repoSortOrder = repoSortOrder === 'asc' ? 'desc' : 'asc';
+      } else {
+        // 不同字段，设置为新字段，默认降序
+        repoSortBy = sortField;
+        repoSortOrder = 'desc';
+      }
+      updateSortIcons('repo');
+      renderRepoList();
+    });
+  });
+  
+  // 归档排序
+  document.querySelectorAll('[id^="archive-sort-"]').forEach(th => {
+    th.addEventListener('click', () => {
+      const sortField = th.dataset.sort;
+      if (archiveSortBy === sortField) {
+        archiveSortOrder = archiveSortOrder === 'asc' ? 'desc' : 'asc';
+      } else {
+        archiveSortBy = sortField;
+        archiveSortOrder = 'desc';
+      }
+      updateSortIcons('archive');
+      renderArchiveList();
+    });
+  });
 
   // 归档搜索
   if (elArchiveSearchInput) {
     elArchiveSearchInput.addEventListener('input', () => {
       renderArchiveList();
     });
+  }
+  
+  // 加载更多按钮
+  const elBtnLoadMoreRepo = document.getElementById('btn-load-more-repo');
+  if (elBtnLoadMoreRepo) {
+    elBtnLoadMoreRepo.addEventListener('click', loadMoreItems);
+  }
+  
+  const elBtnLoadMoreArchive = document.getElementById('btn-load-more-archive');
+  if (elBtnLoadMoreArchive) {
+    elBtnLoadMoreArchive.addEventListener('click', loadMoreArchivedItems);
   }
 
   // 状态筛选按钮
