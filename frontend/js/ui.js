@@ -1038,12 +1038,24 @@ let isEditing = false;
 async function openDetail(item) {
   // 如果item没有raw_content（列表查询不返回），需要从API获取完整数据
   // 对于所有类型（包括PDF），如果没有raw_content都从API获取
-  if (!item.raw_content) {
+  // 检查raw_content是否存在且不为空字符串
+  const hasContent = item.raw_content && item.raw_content.trim().length > 0;
+  
+  if (!hasContent) {
     try {
       showToast('正在加载详情...', 'loading');
       const res = await itemsAPI.getById(item.id);
       if (res.success && res.data) {
         item = res.data;
+        console.log('加载详情成功:', {
+          id: item.id,
+          type: item.type,
+          hasRawContent: !!item.raw_content,
+          rawContentLength: item.raw_content ? item.raw_content.length : 0,
+          hasPageContent: !!item.page_content,
+          pageContentType: Array.isArray(item.page_content) ? 'array' : typeof item.page_content,
+          pageContentLength: Array.isArray(item.page_content) ? item.page_content.length : 0
+        });
         // 更新allItems中的对应项
         const index = allItems.findIndex(it => it.id === item.id);
         if (index !== -1) {
@@ -1136,7 +1148,22 @@ async function openDetail(item) {
       <h2 class="text-sm font-semibold text-slate-800 mb-2">原文内容</h2>
       <article class="prose prose-slate max-w-none text-sm">
         <div id="detail-content" class="whitespace-pre-line leading-relaxed">
-          ${(item.raw_content || '').trim() || '（暂无正文内容）'}
+          ${
+            // 对于PDF类型，优先使用page_content
+            (item.type === 'pdf' && item.page_content && Array.isArray(item.page_content) && item.page_content.length > 0)
+              ? item.page_content.map((page, idx) => {
+                  const pageText = page.text || page.content || '';
+                  return pageText.trim() 
+                    ? `<div class="mb-4 p-3 bg-slate-50 rounded border border-slate-200">
+                        <div class="text-xs text-slate-500 mb-2 font-medium">第 ${idx + 1} 页</div>
+                        <div class="text-slate-700">${escapeHtml(pageText)}</div>
+                      </div>`
+                    : '';
+                }).filter(Boolean).join('') || '（暂无正文内容）'
+              : (item.raw_content && item.raw_content.trim())
+              ? escapeHtml(item.raw_content)
+              : '（暂无正文内容）'
+          }
         </div>
       </article>
     </section>
