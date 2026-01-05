@@ -72,6 +72,12 @@ let archiveSortOrder = 'desc'; // 排序方向：asc, desc
 let apiConfigured = false;
 let globalSearchTerm = '';
 let stats = null;
+let repoTotalCount = 0; // 知识库总数量
+let repoLoadedCount = 0; // 知识库已加载数量
+let repoCurrentPage = 1; // 知识库当前页码
+let archiveTotalCount = 0; // 归档总数量
+let archiveLoadedCount = 0; // 归档已加载数量
+let archiveCurrentPage = 1; // 归档当前页码
 
 // 批量渲染优化：使用requestAnimationFrame合并多个渲染调用
 let renderScheduled = false;
