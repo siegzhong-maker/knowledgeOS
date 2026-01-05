@@ -1488,6 +1488,150 @@ function renderCitations(citations, messageId) {
   `;
 }
 
+// 获取可信度等级
+function getTrustLevel(score) {
+  if (score >= 80) {
+    return { 
+      level: 'high', 
+      label: '高度可信', 
+      icon: '✓', 
+      color: 'green',
+      iconColor: 'text-green-600',
+      bgColor: 'bg-green-50',
+      borderColor: 'border-green-200'
+    };
+  }
+  if (score >= 60) {
+    return { 
+      level: 'medium', 
+      label: '基本可信', 
+      icon: '⚠️', 
+      color: 'yellow',
+      iconColor: 'text-yellow-600',
+      bgColor: 'bg-yellow-50',
+      borderColor: 'border-yellow-200'
+    };
+  }
+  return { 
+    level: 'low', 
+    label: '可信度较低', 
+    icon: '❌', 
+    color: 'red',
+    iconColor: 'text-red-600',
+    bgColor: 'bg-red-50',
+    borderColor: 'border-red-200'
+  };
+}
+
+// 从AI评估说明中提取关键信息
+function extractKeyPoints(explanation, citationValidation, textSimilarity) {
+  if (!explanation) return [];
+  
+  const points = [];
+  const explanationLower = explanation.toLowerCase();
+  
+  // 检测基于知识库
+  if (explanationLower.includes('基于知识库') || explanationLower.includes('知识库内容') || explanationLower.includes('引用自知识库')) {
+    points.push('回答主要来自您的知识库');
+  }
+  
+  // 检测引用信息
+  if (citationValidation.totalCount > 0) {
+    points.push(`引用了${citationValidation.totalCount}个文档页面`);
+    if (citationValidation.validCount === citationValidation.totalCount) {
+      points.push('所有引用都指向真实存在的页面');
+    }
+  }
+  
+  // 检测是否使用通用知识
+  if (explanationLower.includes('通用知识') || explanationLower.includes('外部知识') || explanationLower.includes('ai的通用')) {
+    if (explanationLower.includes('没有') || explanationLower.includes('未')) {
+      points.push('没有使用AI的通用知识');
+    } else {
+      points.push('部分内容来自AI的通用知识');
+    }
+  }
+  
+  // 检测具体案例或数据
+  if (explanationLower.includes('具体') || explanationLower.includes('案例') || explanationLower.includes('数据')) {
+    points.push('使用了知识库中的具体案例或数据');
+  }
+  
+  // 如果没有提取到关键点，使用原始说明的前50个字符
+  if (points.length === 0 && explanation) {
+    const shortExplanation = explanation.length > 50 ? explanation.substring(0, 50) + '...' : explanation;
+    points.push(shortExplanation);
+  }
+  
+  return points;
+}
+
+// 生成用户友好的评估说明
+function generateUserFriendlyExplanation(trustLevel, keyPoints, aiExplanation) {
+  let summary = '';
+  
+  if (trustLevel.level === 'high') {
+    summary = '这个回答高度可信，主要基于您的知识库内容。';
+  } else if (trustLevel.level === 'medium') {
+    summary = '这个回答基本可信，主要基于您的知识库，但可能包含一些AI的通用知识。';
+  } else {
+    summary = '这个回答的可信度较低，可能主要依赖AI的通用知识而非您的知识库。';
+  }
+  
+  return {
+    summary,
+    keyPoints
+  };
+}
+
+// 生成改进建议
+function generateSuggestions(trustLevel, overallScore, citationValidation) {
+  if (trustLevel.level === 'high') {
+    return null; // 高分不需要建议
+  }
+  
+  const suggestions = [];
+  
+  if (trustLevel.level === 'low') {
+    suggestions.push({
+      title: '在问题中明确指出需要引用的文档',
+      detail: '例如："根据《创业流程》文档，..." 或 "参考知识库中的相关内容"',
+      example: '❌ "什么是好老大？"\n✓ "根据知识库中的《创业流程》文档，什么是好老大的标准？"'
+    });
+    suggestions.push({
+      title: '检查知识库中是否有相关文档',
+      detail: '如果知识库缺少相关信息，AI会使用通用知识回答',
+      example: '可以尝试添加更多相关文档到知识库'
+    });
+    suggestions.push({
+      title: '补充知识库内容',
+      detail: '如果知识库缺少相关信息，考虑补充相关内容',
+      example: '上传相关文档或添加相关笔记到知识库'
+    });
+  } else if (trustLevel.level === 'medium') {
+    suggestions.push({
+      title: '更明确地指定引用的文档',
+      detail: '在提问时指出具体的文档或章节',
+      example: '例如："根据《创业流程》第3章的内容..."'
+    });
+    suggestions.push({
+      title: '要求AI引用具体页面',
+      detail: '可以在问题中要求AI引用具体的页面或段落',
+      example: '例如："请引用具体的页面和段落来回答"'
+    });
+    
+    if (citationValidation.totalCount === 0) {
+      suggestions.push({
+        title: '检查知识库中是否有更相关的文档',
+        detail: '可以尝试添加更多相关文档到知识库',
+        example: ''
+      });
+    }
+  }
+  
+  return suggestions;
+}
+
 // 渲染评估结果
 function renderEvaluation(evaluation, messageId) {
   if (!evaluation) return '';
@@ -1497,19 +1641,13 @@ function renderEvaluation(evaluation, messageId) {
   const citationValidation = evaluation.citationValidation || {};
   const aiEvaluation = evaluation.aiEvaluation || {};
   
-  // 根据分数确定颜色
-  let scoreColor = 'text-red-600';
-  let scoreBg = 'bg-red-50';
-  let scoreBorder = 'border-red-200';
-  if (overallScore >= 80) {
-    scoreColor = 'text-green-600';
-    scoreBg = 'bg-green-50';
-    scoreBorder = 'border-green-200';
-  } else if (overallScore >= 60) {
-    scoreColor = 'text-yellow-600';
-    scoreBg = 'bg-yellow-50';
-    scoreBorder = 'border-yellow-200';
-  }
+  // 获取可信度等级
+  const trustLevel = getTrustLevel(overallScore);
+  
+  // 根据可信度确定颜色
+  const scoreColor = trustLevel.iconColor;
+  const scoreBg = trustLevel.bgColor;
+  const scoreBorder = trustLevel.borderColor;
   
   // 警告提示
   const showWarning = overallScore < 60;
@@ -1560,28 +1698,66 @@ function renderEvaluation(evaluation, messageId) {
     `;
   }
   
-  // 改进评估说明，使其更通俗易懂
+  // 生成用户友好的评估说明
   let explanationHtml = '';
   if (aiEvaluation.explanation) {
-    // 将技术化的说明转换为更通俗的语言
-    let explanation = aiEvaluation.explanation;
+    // 提取关键信息
+    const keyPoints = extractKeyPoints(aiEvaluation.explanation, citationValidation, textSimilarity);
     
-    // 如果评分较低，添加改进建议
-    let suggestion = '';
-    if (overallScore < 60) {
-      suggestion = '<div class="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs"><strong>💡 建议：</strong>回答的相关性较低，可能需要更明确地引用知识库中的具体内容，或检查知识库是否包含相关信息。</div>';
-    } else if (overallScore < 80) {
-      suggestion = '<div class="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs"><strong>💡 提示：</strong>回答基本基于知识库，但可以更准确地引用具体内容以提高相关性。</div>';
+    // 生成用户友好的说明
+    const userFriendly = generateUserFriendlyExplanation(trustLevel, keyPoints, aiEvaluation.explanation);
+    
+    // 生成改进建议
+    const suggestions = generateSuggestions(trustLevel, overallScore, citationValidation);
+    
+    // 构建关键信息列表
+    let keyPointsHtml = '';
+    if (keyPoints.length > 0) {
+      keyPointsHtml = `
+        <div class="mt-2 space-y-1">
+          ${keyPoints.map(point => `
+            <div class="flex items-start gap-2">
+              <span class="text-slate-400 mt-0.5">•</span>
+              <span class="text-slate-600 text-xs">${escapeHtml(point)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+    
+    // 构建改进建议HTML
+    let suggestionsHtml = '';
+    if (suggestions && suggestions.length > 0) {
+      const suggestionsList = suggestions.map((suggestion, idx) => `
+        <div class="mb-3 last:mb-0">
+          <div class="font-medium text-slate-700 text-xs mb-1">${idx + 1}. ${escapeHtml(suggestion.title)}</div>
+          <div class="text-slate-600 text-xs mb-1">${escapeHtml(suggestion.detail)}</div>
+          ${suggestion.example ? `<div class="text-slate-500 text-xs font-mono bg-slate-50 p-2 rounded mt-1 whitespace-pre-line">${escapeHtml(suggestion.example)}</div>` : ''}
+        </div>
+      `).join('');
+      
+      suggestionsHtml = `
+        <div class="mt-3 pt-3 border-t border-slate-200">
+          <div class="flex items-center gap-2 mb-2">
+            <i data-lucide="lightbulb" size="14" class="text-yellow-600"></i>
+            <span class="text-slate-700 font-medium text-xs">💡 如何改进：</span>
+          </div>
+          <div class="space-y-2">
+            ${suggestionsList}
+          </div>
+        </div>
+      `;
     }
     
     explanationHtml = `
-      <div class="pt-2 border-t border-slate-200">
-        <div class="flex items-start gap-2 mb-1">
-          <i data-lucide="info" size="14" class="text-slate-400 mt-0.5"></i>
-          <span class="text-slate-500 font-medium">评估说明:</span>
+      <div class="pt-3 border-t border-slate-200">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-lg font-bold ${trustLevel.iconColor}">${trustLevel.icon}</span>
+          <span class="text-slate-700 font-semibold text-sm">回答可信度：${trustLevel.label}</span>
         </div>
-        <p class="text-slate-600 mt-1 ml-6">${escapeHtml(explanation)}</p>
-        ${suggestion}
+        <p class="text-slate-600 text-xs mb-2 leading-relaxed">${escapeHtml(userFriendly.summary)}</p>
+        ${keyPointsHtml}
+        ${suggestionsHtml}
       </div>
     `;
   }
@@ -1594,6 +1770,9 @@ function renderEvaluation(evaluation, messageId) {
           <span class="text-xs font-medium text-slate-700">相关性评估</span>
           <span class="evaluation-score-badge px-2 py-0.5 rounded-full text-xs font-semibold ${scoreColor} ${scoreBg} ${scoreBorder} border">
             ${overallScore}分
+          </span>
+          <span class="trust-level-badge px-2 py-0.5 rounded-full text-xs font-medium ${trustLevel.iconColor} ${trustLevel.bgColor} ${trustLevel.borderColor} border">
+            ${trustLevel.icon} ${trustLevel.label}
           </span>
           ${showWarning ? '<span class="text-xs text-red-600">⚠️ 相关性较低</span>' : ''}
           <button 
