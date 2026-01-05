@@ -132,6 +132,22 @@ export async function renderPDFContent(pdfData, container) {
       pdfUrl = `/api/files/pdf/${pdfId}`;
       console.log('使用PDF.js查看器加载PDF:', pdfUrl, '文件路径:', pdfData.file_path);
 
+      // 先显示加载状态
+      container.innerHTML = `
+        <div class="flex flex-col items-center justify-center py-20">
+          <div class="relative">
+            <div class="animate-spin rounded-full h-16 w-16 border-4 border-indigo-200 border-t-indigo-600 mb-6"></div>
+            <i data-lucide="file-text" size="24" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-600"></i>
+          </div>
+          <p class="text-sm font-medium text-slate-700 mb-2">正在加载PDF...</p>
+          <p class="text-xs text-slate-400">请稍候</p>
+        </div>
+      `;
+      container.classList.remove('opacity-0');
+      if (window.lucide) {
+        lucide.createIcons(container);
+      }
+
       // 先测试PDF URL是否可访问
       try {
         console.log('测试PDF URL可访问性:', pdfUrl);
@@ -139,7 +155,13 @@ export async function renderPDFContent(pdfData, container) {
         console.log('PDF URL测试响应:', testResponse.status, testResponse.statusText);
         
         if (!testResponse.ok) {
-          throw new Error(`PDF文件访问失败: ${testResponse.status} ${testResponse.statusText}`);
+          if (testResponse.status === 404) {
+            throw new Error('PDF文件访问失败: 404 文件未找到');
+          } else if (testResponse.status === 403) {
+            throw new Error('PDF文件访问失败: 403 权限不足');
+          } else {
+            throw new Error(`PDF文件访问失败: ${testResponse.status} ${testResponse.statusText}`);
+          }
         }
       } catch (fetchError) {
         console.error('PDF URL访问测试失败:', fetchError);
@@ -188,13 +210,38 @@ export async function renderPDFContent(pdfData, container) {
         workerSrc: typeof pdfjsLib !== 'undefined' ? pdfjsLib.GlobalWorkerOptions?.workerSrc : 'N/A'
       });
       
-      // 不要立即降级到文本显示，先显示错误，让用户知道是PDF查看器的问题
+      // 根据错误类型提供更友好的提示
+      let errorMessage = error.message || '未知错误';
+      let errorIcon = 'file-x';
+      let errorTitle = 'PDF加载失败';
+      let showTextFallback = true;
+      
+      // 针对404错误提供更友好的提示
+      if (error.message && error.message.includes('404')) {
+        errorTitle = 'PDF文件未找到';
+        errorMessage = '文件可能已被删除或路径不正确';
+        errorIcon = 'file-question';
+        showTextFallback = false; // 404时不需要降级到文本显示
+      } else if (error.message && error.message.includes('403')) {
+        errorTitle = '无法访问PDF文件';
+        errorMessage = '没有权限访问此文件';
+        errorIcon = 'file-lock';
+      } else if (error.message && error.message.includes('500')) {
+        errorTitle = '服务器错误';
+        errorMessage = '服务器处理文件时出错，请稍后重试';
+      }
+      
       container.innerHTML = `
-        <div class="flex flex-col items-center justify-center py-20">
-          <i data-lucide="file-x" size="48" class="text-red-400 mb-4"></i>
-          <p class="text-sm text-red-600 mb-2">渲染PDF失败</p>
-          <p class="text-xs text-slate-500 mb-2">${error.message || '未知错误'}</p>
-          <p class="text-xs text-slate-400 mb-4">正在尝试显示文本内容...</p>
+        <div class="flex flex-col items-center justify-center py-20 px-4">
+          <i data-lucide="${errorIcon}" size="64" class="text-slate-300 mb-6"></i>
+          <h3 class="text-base font-semibold text-slate-700 mb-2">${errorTitle}</h3>
+          <p class="text-sm text-slate-500 mb-6 text-center max-w-md">${errorMessage}</p>
+          ${showTextFallback ? `
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+              <i data-lucide="loader-2" size="14" class="animate-spin"></i>
+              <span>正在尝试显示文本内容...</span>
+            </div>
+          ` : ''}
         </div>
       `;
       container.classList.remove('opacity-0');
@@ -202,11 +249,13 @@ export async function renderPDFContent(pdfData, container) {
         lucide.createIcons(container);
       }
       
-      // 延迟降级到文本显示，让用户看到错误信息
-      setTimeout(() => {
-        console.log('降级到文本显示...');
-        renderPDFContentAsText(pdfData, container);
-      }, 2000);
+      // 只在非404错误时延迟降级到文本显示
+      if (showTextFallback && pdfData && pdfData.page_content) {
+        setTimeout(() => {
+          console.log('降级到文本显示...');
+          renderPDFContentAsText(pdfData, container);
+        }, 2000);
+      }
       
       return;
     }

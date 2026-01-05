@@ -903,11 +903,18 @@ export async function loadDoc(docId, autoOpenPanel = false) {
       // 先清空容器并显示加载状态
       container.innerHTML = `
         <div class="flex flex-col items-center justify-center py-20">
-          <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-          <p class="text-sm text-slate-500">正在加载PDF...</p>
+          <div class="relative">
+            <div class="animate-spin rounded-full h-16 w-16 border-4 border-indigo-200 border-t-indigo-600 mb-6"></div>
+            <i data-lucide="file-text" size="24" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-600"></i>
+          </div>
+          <p class="text-sm font-medium text-slate-700 mb-2">正在加载PDF...</p>
+          <p class="text-xs text-slate-400">请稍候</p>
         </div>
       `;
       container.classList.remove('opacity-0');
+      if (window.lucide) {
+        lucide.createIcons(container);
+      }
       
       try {
         // renderPDFContent现在是async函数
@@ -917,11 +924,32 @@ export async function loadDoc(docId, autoOpenPanel = false) {
         container.classList.remove('opacity-0');
       } catch (error) {
         console.error('渲染PDF内容时出错:', error);
+        
+        // 根据错误类型提供更友好的提示
+        let errorMessage = error.message || '未知错误';
+        let errorIcon = 'file-x';
+        let errorTitle = 'PDF加载失败';
+        
+        // 针对404错误提供更友好的提示
+        if (error.message && error.message.includes('404')) {
+          errorTitle = 'PDF文件未找到';
+          errorMessage = '文件可能已被删除或路径不正确，请刷新页面或联系管理员';
+          errorIcon = 'file-question';
+        } else if (error.message && error.message.includes('403')) {
+          errorTitle = '无法访问PDF文件';
+          errorMessage = '没有权限访问此文件';
+          errorIcon = 'file-lock';
+        } else if (error.message && error.message.includes('500')) {
+          errorTitle = '服务器错误';
+          errorMessage = '服务器处理文件时出错，请稍后重试';
+          errorIcon = 'alert-circle';
+        }
+        
         container.innerHTML = `
-          <div class="flex flex-col items-center justify-center py-20">
-            <i data-lucide="file-x" size="48" class="text-red-400 mb-4"></i>
-            <p class="text-sm text-red-600 mb-2">渲染PDF失败</p>
-            <p class="text-xs text-slate-500">${error.message || '未知错误'}</p>
+          <div class="flex flex-col items-center justify-center py-20 px-4">
+            <i data-lucide="${errorIcon}" size="64" class="text-slate-300 mb-6"></i>
+            <h3 class="text-base font-semibold text-slate-700 mb-2">${errorTitle}</h3>
+            <p class="text-sm text-slate-500 text-center max-w-md">${errorMessage}</p>
           </div>
         `;
         container.classList.remove('opacity-0');
