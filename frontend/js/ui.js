@@ -170,6 +170,9 @@ let pdfViewerState = {
   isRendering: false  // 是否正在渲染
 };
 
+// 当前选中的行ID
+let selectedRowId = null;
+
 // 简单 Toast
 function showToast(message, type = 'success') {
   const toast = document.createElement('div');
@@ -462,8 +465,9 @@ function renderRepoList() {
   }
 
   // 使用DocumentFragment优化DOM操作性能
+  // 注意：由于elRepoList是tbody，需要使用tbody作为临时容器
   const fragment = document.createDocumentFragment();
-  const tempDiv = document.createElement('div');
+  const tempTbody = document.createElement('tbody');
   
   data.forEach((item) => {
     // 状态徽章
@@ -476,9 +480,9 @@ function renderRepoList() {
       statusBadge = '<span class="px-2 inline-flex text-[11px] leading-5 font-semibold rounded-full bg-slate-100 text-slate-600">已归档</span>';
     }
     
-    tempDiv.innerHTML = `
-    <tr class="hover:bg-slate-50 transition-colors" data-id="${item.id}">
-      <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900 cursor-pointer" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+    tempTbody.innerHTML = `
+    <tr class="cursor-pointer" data-id="${item.id}" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+      <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
@@ -526,7 +530,10 @@ function renderRepoList() {
       </td>
     </tr>
     `;
-    fragment.appendChild(tempDiv.firstElementChild);
+    // 将tbody中的tr移动到fragment
+    while (tempTbody.firstChild) {
+      fragment.appendChild(tempTbody.firstChild);
+    }
   });
   
   // 清空现有内容并批量插入
@@ -584,13 +591,14 @@ function renderArchiveList() {
   }
 
   // 使用DocumentFragment优化DOM操作性能
+  // 注意：由于elArchiveList是tbody，需要使用tbody作为临时容器
   const fragment = document.createDocumentFragment();
-  const tempDiv = document.createElement('div');
+  const tempTbody = document.createElement('tbody');
   
   data.forEach((item) => {
-    tempDiv.innerHTML = `
-    <tr class="hover:bg-slate-50 transition-colors" data-id="${item.id}">
-      <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900 cursor-pointer" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+    tempTbody.innerHTML = `
+    <tr class="cursor-pointer" data-id="${item.id}" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+      <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
       <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
@@ -635,7 +643,10 @@ function renderArchiveList() {
       </td>
     </tr>
     `;
-    fragment.appendChild(tempDiv.firstElementChild);
+    // 将tbody中的tr移动到fragment
+    while (tempTbody.firstChild) {
+      fragment.appendChild(tempTbody.firstChild);
+    }
   });
   
   // 清空现有内容并批量插入
@@ -1055,7 +1066,22 @@ async function handleDeleteTag(tag) {
 
 // 打开详情
 let isEditing = false;
+
 async function openDetail(item) {
+  // 移除之前选中的行
+  if (selectedRowId) {
+    const prevRow = document.querySelector(`tr[data-id="${selectedRowId}"]`);
+    if (prevRow) {
+      prevRow.classList.remove('selected');
+    }
+  }
+  
+  // 标记当前行为选中状态
+  selectedRowId = item.id;
+  const currentRow = document.querySelector(`tr[data-id="${item.id}"]`);
+  if (currentRow) {
+    currentRow.classList.add('selected');
+  }
   // 如果item没有raw_content（列表查询不返回），需要从API获取完整数据
   // 对于所有类型（包括PDF），如果没有raw_content都从API获取
   // 检查raw_content是否存在且不为空字符串
@@ -1345,6 +1371,15 @@ async function handleSaveEdit() {
 function closeDetail() {
   elViewDetail.classList.add('hidden');
   currentItem = null;
+  
+  // 清除选中状态
+  if (selectedRowId) {
+    const row = document.querySelector(`tr[data-id="${selectedRowId}"]`);
+    if (row) {
+      row.classList.remove('selected');
+    }
+    selectedRowId = null;
+  }
   
   // 恢复背景滚动
   document.body.style.overflow = '';

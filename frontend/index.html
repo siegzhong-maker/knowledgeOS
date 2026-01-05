@@ -287,6 +287,15 @@
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
     }
+    /* 表格行选中状态 - 固定选中，不跟随光标 */
+    #repo-list tr.selected,
+    #archive-list tr.selected {
+      background-color: #f1f5f9;
+    }
+    #repo-list tr:not(.selected):hover,
+    #archive-list tr:not(.selected):hover {
+      background-color: #f8fafc;
+    }
     /* Markdown 内容样式优化 */
     .prose strong {
       font-weight: 600;
