@@ -1,6 +1,7 @@
 import { consultationAPI } from './api.js';
 import { pdfAPI } from './api.js';
 import { itemsAPI } from './api.js';
+import { settingsAPI } from './api.js';
 import { getCurrentContext, formatContextLabel, getValidContext } from './context.js';
 import { renderPDFContent, highlightPage, scrollToQuote, getPDFContent, highlightTextInPDF } from './pdf.js';
 
@@ -1827,10 +1828,165 @@ export function copyMessage(messageId) {
   });
 }
 
+// 检查API是否配置
+async function checkApiConfigured() {
+  try {
+    const res = await settingsAPI.get();
+    const data = res.data || {};
+    return !!data.deepseek_api_key_configured;
+  } catch (error) {
+    console.error('检查API配置失败:', error);
+    return false;
+  }
+}
+
+// 打开设置对话框（咨询工作台专用）
+async function openSettingsModalFromConsultation() {
+  try {
+    // 尝试触发设置按钮的点击事件（这是最推荐的方式，因为会触发loadSettings）
+    const settingsBtn = document.getElementById('btn-open-settings');
+    if (settingsBtn) {
+      settingsBtn.click();
+      return;
+    }
+    
+    // 如果按钮不存在，尝试直接操作模态框并加载设置
+    const settingsModal = document.getElementById('settings-modal');
+    if (settingsModal) {
+      // 尝试加载设置（通过调用settingsAPI）
+      try {
+        await settingsAPI.get();
+      } catch (e) {
+        console.warn('加载设置失败:', e);
+      }
+      
+      settingsModal.classList.remove('hidden');
+      settingsModal.classList.add('flex');
+      const settingsContent = document.getElementById('settings-content');
+      if (settingsContent) {
+        requestAnimationFrame(() => {
+          settingsContent.classList.remove('opacity-0', 'scale-95');
+          settingsContent.classList.add('opacity-100', 'scale-100');
+        });
+      }
+      return;
+    }
+    
+    // 最后的降级方案：显示提示
+    alert('请先在设置中配置 DeepSeek API Key\n\n点击侧边栏底部的设置图标进行配置');
+  } catch (error) {
+    console.error('打开设置对话框失败:', error);
+    alert('请先在设置中配置 DeepSeek API Key\n\n点击侧边栏底部的设置图标进行配置');
+  }
+}
+
 // 重新生成消息
-export function regenerateMessage(messageId) {
-  // TODO: 实现重新生成逻辑
-  console.log('重新生成消息:', messageId);
+export async function regenerateMessage(messageId) {
+  try {
+    // 检查API配置
+    const apiConfigured = await checkApiConfigured();
+    if (!apiConfigured) {
+      // 显示提示并打开设置对话框
+      const shouldConfigure = confirm('未配置 DeepSeek API Key，无法重新生成对话。\n\n是否前往设置页面配置？');
+      if (shouldConfigure) {
+        openSettingsModalFromConsultation();
+      }
+      return;
+    }
+    
+    // 找到对应的消息元素
+    const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageEl) {
+      console.error('找不到消息元素:', messageId);
+      return;
+    }
+    
+    // 找到消息在DOM中的位置
+    const chatStream = document.getElementById('chat-stream');
+    if (!chatStream) {
+      console.error('找不到聊天流容器');
+      return;
+    }
+    
+    // 找到消息在DOM中的所有消息列表中的位置
+    const allMessages = Array.from(chatStream.children);
+    const messageIndex = allMessages.indexOf(messageEl);
+    if (messageIndex === -1) {
+      console.error('无法找到消息在列表中的位置');
+      return;
+    }
+    
+    // 向前查找对应的用户消息（应该在前一个位置）
+    let userMessageEl = null;
+    let userMessageIndex = -1;
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      const msgEl = allMessages[i];
+      if (msgEl.classList.contains('justify-end')) {
+        // 找到用户消息（右对齐的消息）
+        userMessageEl = msgEl;
+        userMessageIndex = i;
+        break;
+      }
+    }
+    
+    if (!userMessageEl) {
+      console.error('找不到对应的用户消息');
+      return;
+    }
+    
+    // 获取用户消息的内容
+    const userMessageContent = userMessageEl.querySelector('.msg-user')?.textContent?.trim();
+    if (!userMessageContent) {
+      console.error('无法获取用户消息内容');
+      return;
+    }
+    
+    // 在state.history中找到对应的消息对并移除
+    // 从后往前查找，找到最后一个匹配的用户消息
+    let foundUserIndex = -1;
+    for (let i = state.history.length - 1; i >= 0; i--) {
+      const msg = state.history[i];
+      if (msg.role === 'user' && msg.content === userMessageContent) {
+        // 检查这是否是对应的消息对
+        // 如果下一个消息是assistant，且是我们找到的消息，则确认
+        if (i + 1 < state.history.length && state.history[i + 1].role === 'assistant') {
+          foundUserIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (foundUserIndex === -1) {
+      console.error('在历史记录中找不到对应的消息');
+      // 仍然尝试重新生成，使用找到的用户消息内容
+    } else {
+      // 移除用户消息和AI回复（从foundUserIndex开始的两个消息）
+      state.history.splice(foundUserIndex, 2);
+    }
+    
+    // 从DOM中移除用户消息和AI消息
+    const messagesToRemove = [];
+    if (userMessageIndex >= 0) {
+      messagesToRemove.push(userMessageEl);
+    }
+    if (messageIndex >= 0) {
+      messagesToRemove.push(messageEl);
+    }
+    
+    messagesToRemove.forEach(msg => {
+      if (msg.parentNode) {
+        msg.remove();
+      }
+    });
+    
+    // 重新发送用户消息
+    await handleConversation(userMessageContent);
+    
+  } catch (error) {
+    console.error('重新生成消息失败:', error);
+    const errorMsg = error.message || '重新生成失败，请稍后重试';
+    addAiMessage(`❌ **重新生成失败**：${errorMsg}`);
+  }
 }
 
 // 切换右侧面板
@@ -4063,24 +4219,32 @@ window.showDocContextMenu = function(event, docId) {
 function updateEvaluationQuickToggle() {
   const toggleButtons = document.querySelectorAll('#toggle-evaluation-quick');
   const iconElements = document.querySelectorAll('#evaluation-icon');
+  const labelElements = document.querySelectorAll('#evaluation-label');
   
   if (toggleButtons.length === 0 || iconElements.length === 0) return;
   
   const sessionValue = localStorage.getItem('knowledge_relevance_evaluation_enabled');
   const isEnabled = sessionValue === null || sessionValue === 'true'; // 默认启用
   
-  // 更新所有按钮和图标
+  // 更新所有按钮、图标和标签
   toggleButtons.forEach((toggleBtn, index) => {
     const iconEl = iconElements[index] || iconElements[0]; // 如果索引不匹配，使用第一个图标
+    const labelEl = labelElements[index] || labelElements[0]; // 标签元素
     
     if (isEnabled) {
-      toggleBtn.classList.remove('text-slate-400');
-      toggleBtn.classList.add('text-indigo-600', 'bg-indigo-50');
+      // 开启状态：使用激活样式和图标
+      toggleBtn.classList.remove('text-slate-600', 'bg-white', 'border-slate-200');
+      toggleBtn.classList.add('text-indigo-600', 'bg-indigo-50', 'border-indigo-200');
       if (iconEl) iconEl.setAttribute('data-lucide', 'bar-chart-2');
+      if (labelEl) labelEl.textContent = '评估';
+      toggleBtn.title = '相关性评估已开启：点击关闭';
     } else {
-      toggleBtn.classList.remove('text-indigo-600', 'bg-indigo-50');
-      toggleBtn.classList.add('text-slate-400');
-      if (iconEl) iconEl.setAttribute('data-lucide', 'bar-chart-2');
+      // 关闭状态：使用非激活样式和图标
+      toggleBtn.classList.remove('text-indigo-600', 'bg-indigo-50', 'border-indigo-200');
+      toggleBtn.classList.add('text-slate-600', 'bg-white', 'border-slate-200');
+      if (iconEl) iconEl.setAttribute('data-lucide', 'bar-chart');
+      if (labelEl) labelEl.textContent = '评估';
+      toggleBtn.title = '相关性评估已关闭：点击开启';
     }
     
     if (window.lucide && iconEl) {
