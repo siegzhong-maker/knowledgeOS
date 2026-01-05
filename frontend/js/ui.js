@@ -1800,36 +1800,177 @@ async function handleSwitchUser() {
     const userList = getUserList();
     const currentUserId = getCurrentUserId();
     
-    // 构建用户列表文本
-    const userListText = userList.map(u => {
-      const isCurrent = u.id === currentUserId;
-      return `${isCurrent ? '→ ' : '  '}${u.name} ${u.hasApiKey ? '(已配置API Key)' : '(未配置)'}`;
-    }).join('\n');
+    // 创建模态对话框
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.id = 'switch-user-modal';
     
-    // 显示切换用户对话框
-    const input = prompt(`当前用户列表:\n\n${userListText}\n\n输入新用户名创建用户，或输入已有用户名切换:\n`, '');
+    modal.innerHTML = `
+      <div class="glass w-full max-w-md rounded-2xl shadow-2xl p-6 transform transition-all duration-200 scale-95 opacity-0">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold text-slate-900">切换用户</h2>
+          <button
+            id="btn-close-switch-user"
+            class="text-slate-400 hover:text-slate-600"
+          >
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+        
+        <div class="mb-4">
+          <p class="text-sm text-slate-600 mb-3">选择要切换的用户：</p>
+          <div id="user-list-container" class="space-y-2 max-h-64 overflow-y-auto">
+            <!-- 用户列表将在这里动态生成 -->
+          </div>
+        </div>
+        
+        <div class="border-t pt-4 mt-4">
+          <p class="text-sm text-slate-600 mb-3">或创建新用户：</p>
+          <div class="flex gap-2">
+            <input
+              type="text"
+              id="new-user-name"
+              class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="输入新用户名"
+            />
+            <button
+              id="btn-create-user"
+              class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+            >
+              创建
+            </button>
+          </div>
+        </div>
+        
+        <div class="flex justify-end gap-2 mt-6">
+          <button
+            id="btn-cancel-switch-user"
+            class="px-4 py-2 text-slate-600 hover:text-slate-800 text-sm font-medium"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    `;
     
-    if (input === null || !input.trim()) {
-      return; // 用户取消或输入为空
-    }
+    document.body.appendChild(modal);
     
-    const userName = input.trim();
+    // 生成用户列表选项
+    const userListContainer = modal.querySelector('#user-list-container');
+    userList.forEach(user => {
+      const isCurrent = user.id === currentUserId;
+      const userItem = document.createElement('label');
+      userItem.className = `flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${
+        isCurrent 
+          ? 'border-indigo-500 bg-indigo-50' 
+          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+      }`;
+      
+      userItem.innerHTML = `
+        <input
+          type="radio"
+          name="selected-user"
+          value="${user.id}"
+          class="mr-3 text-indigo-600 focus:ring-indigo-500"
+          ${isCurrent ? 'checked' : ''}
+        />
+        <div class="flex-1">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-slate-900">${user.name}</span>
+            ${isCurrent ? '<span class="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">当前</span>' : ''}
+          </div>
+          <div class="text-xs text-slate-500 mt-1">
+            ${user.hasApiKey ? '✓ 已配置 API Key' : '未配置 API Key'}
+          </div>
+        </div>
+      `;
+      
+      userItem.addEventListener('click', () => {
+        // 移除其他选中状态
+        userListContainer.querySelectorAll('label').forEach(label => {
+          label.classList.remove('border-indigo-500', 'bg-indigo-50');
+          label.classList.add('border-slate-200');
+        });
+        // 添加当前选中状态
+        userItem.classList.add('border-indigo-500', 'bg-indigo-50');
+        userItem.classList.remove('border-slate-200');
+      });
+      
+      userListContainer.appendChild(userItem);
+    });
     
-    // 检查是否是已有用户
-    const existingUser = userList.find(u => u.name === userName);
-    if (existingUser) {
-      // 切换到已有用户
-      switchUser(existingUser.id);
-      showToast(`已切换到用户: ${existingUser.name}`, 'success');
-    } else {
-      // 创建新用户
-      const newUserId = createUser(userName);
+    // 关闭按钮
+    const closeModal = () => {
+      modal.classList.add('opacity-0');
+      setTimeout(() => {
+        document.body.removeChild(modal);
+      }, 200);
+    };
+    
+    modal.querySelector('#btn-close-switch-user').addEventListener('click', closeModal);
+    modal.querySelector('#btn-cancel-switch-user').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    
+    // 创建新用户按钮
+    modal.querySelector('#btn-create-user').addEventListener('click', async () => {
+      const newUserName = modal.querySelector('#new-user-name').value.trim();
+      if (!newUserName) {
+        showToast('请输入用户名', 'error');
+        return;
+      }
+      
+      // 检查用户名是否已存在
+      if (userList.find(u => u.name === newUserName)) {
+        showToast('用户名已存在', 'error');
+        return;
+      }
+      
+      const newUserId = createUser(newUserName);
       switchUser(newUserId);
-      showToast(`已创建并切换到用户: ${userName}`, 'success');
-    }
+      showToast(`已创建并切换到用户: ${newUserName}`, 'success');
+      closeModal();
+      await loadSettings();
+    });
     
-    // 重新加载设置以更新显示
-    await loadSettings();
+    // 切换用户（双击或点击确认）
+    userListContainer.querySelectorAll('input[type="radio"]').forEach(radio => {
+      radio.addEventListener('change', async (e) => {
+        if (e.target.checked) {
+          const selectedUserId = e.target.value;
+          const selectedUser = userList.find(u => u.id === selectedUserId);
+          if (selectedUser && selectedUser.id !== currentUserId) {
+            switchUser(selectedUserId);
+            showToast(`已切换到用户: ${selectedUser.name}`, 'success');
+            closeModal();
+            await loadSettings();
+          }
+        }
+      });
+    });
+    
+    // 双击切换
+    userListContainer.querySelectorAll('label').forEach(label => {
+      label.addEventListener('dblclick', async () => {
+        const radio = label.querySelector('input[type="radio"]');
+        if (radio && radio.value !== currentUserId) {
+          const selectedUser = userList.find(u => u.id === radio.value);
+          if (selectedUser) {
+            switchUser(selectedUser.id);
+            showToast(`已切换到用户: ${selectedUser.name}`, 'success');
+            closeModal();
+            await loadSettings();
+          }
+        }
+      });
+    });
+    
+    // 显示动画
+    requestAnimationFrame(() => {
+      modal.querySelector('.glass').classList.add('opacity-100', 'scale-100');
+      modal.querySelector('.glass').classList.remove('opacity-0', 'scale-95');
+    });
   } catch (error) {
     console.error('切换用户失败:', error);
     showToast('切换用户失败: ' + (error.message || '未知错误'), 'error');
