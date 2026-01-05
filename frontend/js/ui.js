@@ -1077,28 +1077,84 @@ async function openDetail(item) {
   currentItem = item;
   isEditing = false;
   elViewDetail.classList.remove('hidden');
+  
+  // 清理PDF预览器状态（如果存在）
+  pdfViewerState = {
+    pdfDoc: null,
+    currentPage: 1,
+    totalPages: 0,
+    scale: 1.0
+  };
 
   const tagsStr =
     (item.tags && item.tags.length > 0
       ? item.tags.map((t) => `#${t}`).join(' ')
       : '') || '无';
 
-  elDetailContent.innerHTML = `
-    <header class="mb-8 border-b border-slate-100 pb-5">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center text-xs text-slate-500">
+  // 如果是PDF类型且有file_path，显示PDF预览
+  if (item.type === 'pdf' && item.file_path) {
+    elDetailContent.innerHTML = `
+      <header class="mb-6 border-b border-slate-200 pb-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center text-xs text-slate-500">
+            <span class="inline-flex items-center mr-3 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700">
+              <i class="fa-solid fa-file-pdf mr-1"></i> PDF
+            </span>
+            <span>${formatTime(item.created_at)}</span>
+            ${item.page_count ? `<span class="ml-3">共 ${item.page_count} 页</span>` : ''}
+          </div>
+        </div>
+        <h1 id="detail-title" class="text-2xl md:text-3xl font-bold text-slate-900 leading-tight mb-2">
+          ${item.title}
+        </h1>
+        <div class="flex flex-wrap items-center text-xs text-slate-500 gap-2">
+          <span>来源：${item.source || '手动添加'}</span>
+          ${item.tags && item.tags.length > 0 ? `<span class="mx-1 text-slate-300">·</span><span>标签：${item.tags.map(t => `#${t}`).join(' ')}</span>` : ''}
+        </div>
+      </header>
+      <section class="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+        <div id="pdf-viewer-container" class="w-full">
+          <div class="flex items-center justify-center mb-4">
+            <div class="flex items-center gap-2">
+              <button id="pdf-prev-page" class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="fa-solid fa-chevron-left mr-1"></i> 上一页
+              </button>
+              <span id="pdf-page-info" class="px-4 py-1.5 text-sm text-slate-600">加载中...</span>
+              <button id="pdf-next-page" class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                下一页 <i class="fa-solid fa-chevron-right ml-1"></i>
+              </button>
+              <span class="mx-2 text-slate-300">|</span>
+              <button id="pdf-zoom-out" class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                <i class="fa-solid fa-minus"></i>
+              </button>
+              <span id="pdf-zoom-level" class="px-3 py-1.5 text-sm text-slate-600">100%</span>
+              <button id="pdf-zoom-in" class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+          </div>
+          <div id="pdf-canvas-container" class="w-full overflow-auto bg-slate-100 rounded border border-slate-200" style="min-height: 600px; max-height: calc(100vh - 300px);">
+            <canvas id="pdf-canvas" class="mx-auto block"></canvas>
+          </div>
+        </div>
+      </section>
+    `;
+    
+    // 初始化PDF预览
+    initPDFViewer(item.id, item.file_path);
+  } else {
+    // 非PDF类型或没有file_path，显示文本内容
+    elDetailContent.innerHTML = `
+      <header class="mb-8 border-b border-slate-100 pb-5">
+        <div class="flex items-center text-xs text-slate-500 mb-3">
           <span class="inline-flex items-center mr-3 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
-            item.type === 'pdf' 
-              ? 'bg-red-100 text-red-700' 
-              : item.type === 'link'
+            item.type === 'link'
               ? 'bg-blue-100 text-blue-700'
               : item.type === 'memo'
               ? 'bg-purple-100 text-purple-700'
               : 'bg-slate-100 text-slate-700'
           }">
-            ${item.type === 'pdf' 
-              ? '<i class="fa-solid fa-file-pdf mr-1"></i> PDF'
-              : item.type === 'link'
+            ${item.type === 'link'
               ? '<i class="fa-solid fa-link mr-1"></i> 链接'
               : item.type === 'memo'
               ? '<i class="fa-solid fa-sticky-note mr-1"></i> 备忘录'
@@ -1111,98 +1167,53 @@ async function openDetail(item) {
               : ''
           }
         </div>
-        <button
-          id="btn-edit-item"
-          class="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
-        >
-          <i class="fa-solid fa-pen mr-1"></i> 编辑
-        </button>
-      </div>
-      <h1 id="detail-title" class="text-2xl md:text-3xl font-bold text-slate-900 leading-tight mb-3">
-        ${item.title}
-      </h1>
-      <div class="flex flex-wrap items-center text-xs text-slate-500 gap-2">
-        <span>来源：${item.source || '手动添加'}</span>
-        <span class="mx-1 text-slate-300">·</span>
-        <span id="detail-tags">标签：${tagsStr}</span>
-        <button
-          id="btn-suggest-tags"
-          class="ml-2 px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
-          title="AI 建议标签"
-        >
-          <i class="fa-solid fa-tags mr-1"></i> 建议标签
-        </button>
-      </div>
-    </header>
-    ${
-      item.summary_ai
-        ? `<section class="mb-6">
-            <h2 class="text-sm font-semibold text-slate-800 mb-2">AI 摘要</h2>
-            <div class="prose prose-sm prose-slate max-w-none text-slate-700 bg-indigo-50 border border-indigo-100 rounded-xl p-4 prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1">
-              ${parseMarkdown(item.summary_ai)}
-            </div>
-          </section>`
-        : ''
-    }
-    <section>
-      <h2 class="text-sm font-semibold text-slate-800 mb-2">原文内容</h2>
-      <article class="prose prose-slate max-w-none text-sm">
-        <div id="detail-content" class="whitespace-pre-line leading-relaxed">
-          ${
-            // 对于PDF类型，优先使用page_content
-            (item.type === 'pdf' && item.page_content && Array.isArray(item.page_content) && item.page_content.length > 0)
-              ? item.page_content.map((page, idx) => {
-                  const pageText = page.text || page.content || '';
-                  return pageText.trim() 
-                    ? `<div class="mb-4 p-3 bg-slate-50 rounded border border-slate-200">
-                        <div class="text-xs text-slate-500 mb-2 font-medium">第 ${idx + 1} 页</div>
-                        <div class="text-slate-700">${escapeHtml(pageText)}</div>
-                      </div>`
-                    : '';
-                }).filter(Boolean).join('') || '（暂无正文内容）'
-              : (item.raw_content && item.raw_content.trim())
-              ? escapeHtml(item.raw_content)
-              : '（暂无正文内容）'
-          }
+        <h1 id="detail-title" class="text-2xl md:text-3xl font-bold text-slate-900 leading-tight mb-3">
+          ${item.title}
+        </h1>
+        <div class="flex flex-wrap items-center text-xs text-slate-500 gap-2">
+          <span>来源：${item.source || '手动添加'}</span>
+          ${item.tags && item.tags.length > 0 ? `<span class="mx-1 text-slate-300">·</span><span>标签：${item.tags.map(t => `#${t}`).join(' ')}</span>` : ''}
         </div>
-      </article>
-    </section>
-  `;
-
-  // 绑定编辑按钮
-  const btnEdit = elDetailContent.querySelector('#btn-edit-item');
-  if (btnEdit) {
-    btnEdit.addEventListener('click', () => toggleEditMode());
+      </header>
+      ${
+        item.summary_ai
+          ? `<section class="mb-6">
+              <h2 class="text-sm font-semibold text-slate-800 mb-2">AI 摘要</h2>
+              <div class="prose prose-sm prose-slate max-w-none text-slate-700 bg-indigo-50 border border-indigo-100 rounded-xl p-4 prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1">
+                ${parseMarkdown(item.summary_ai)}
+              </div>
+            </section>`
+          : ''
+      }
+      <section>
+        <h2 class="text-sm font-semibold text-slate-800 mb-2">原文内容</h2>
+        <article class="prose prose-slate max-w-none text-sm">
+          <div id="detail-content" class="whitespace-pre-line leading-relaxed">
+            ${
+              (item.type === 'pdf' && item.page_content && Array.isArray(item.page_content) && item.page_content.length > 0)
+                ? item.page_content.map((page, idx) => {
+                    const pageText = page.text || page.content || '';
+                    return pageText.trim() 
+                      ? `<div class="mb-4 p-3 bg-slate-50 rounded border border-slate-200">
+                          <div class="text-xs text-slate-500 mb-2 font-medium">第 ${idx + 1} 页</div>
+                          <div class="text-slate-700">${escapeHtml(pageText)}</div>
+                        </div>`
+                      : '';
+                  }).filter(Boolean).join('') || '（暂无正文内容）'
+                : (item.raw_content && item.raw_content.trim())
+                ? escapeHtml(item.raw_content)
+                : '（暂无正文内容）'
+            }
+          </div>
+        </article>
+      </section>
+    `;
   }
 
-  // 绑定建议标签按钮
-  const btnSuggestTags = elDetailContent.querySelector('#btn-suggest-tags');
-  if (btnSuggestTags) {
-    btnSuggestTags.addEventListener('click', () => {
-      if (!apiConfigured) {
-        showToast('请先在设置中配置 DeepSeek API Key', 'info');
-        openSettingsModal();
-        return;
-      }
-      if (item.raw_content) {
-        showTagSuggestions(item.id, item.raw_content);
-      } else {
-        showToast('当前内容没有正文可供分析', 'info');
-      }
-    });
+  // 如果是PDF，初始化PDF预览器
+  if (item.type === 'pdf' && item.file_path) {
+    // PDF预览器的事件绑定在initPDFViewer中处理
   }
-
-  // 重置聊天区
-  elChatHistory.innerHTML = `
-    <div class="text-xs text-slate-500">
-      <p>你可以直接问这篇内容相关的问题，例如：</p>
-      <ul class="mt-2 space-y-1 list-disc list-inside">
-        <li>帮我总结这篇内容的三个要点？</li>
-        <li>如果要做行动计划，可以怎么拆解？</li>
-      </ul>
-    </div>
-  `;
-  elChatInput.value = '';
 }
 
 // 切换编辑模式

@@ -11,29 +11,6 @@ async function initDatabase() {
       throw new Error('Database pool not initialized');
     }
     
-    // 数据保护：检查数据库中是否已有数据
-    console.log('检查数据库状态...');
-    let hasExistingData = false;
-    try {
-      const result = await client.query(`
-        SELECT COUNT(*) as count FROM source_items
-      `);
-      const itemCount = parseInt(result.rows[0]?.count || 0);
-      if (itemCount > 0) {
-        hasExistingData = true;
-        console.log(`⚠️  检测到数据库中已有 ${itemCount} 条记录，将保护现有数据`);
-      } else {
-        console.log('✓ 数据库为空，可以安全初始化');
-      }
-    } catch (err) {
-      // 表可能不存在，这是正常的首次初始化
-      if (err.message.includes('does not exist')) {
-        console.log('✓ 首次初始化数据库');
-      } else {
-        console.warn('检查数据库状态时出现警告:', err.message);
-      }
-    }
-    
     // 创建表
     console.log('开始创建PostgreSQL表...\n');
 
@@ -67,8 +44,10 @@ async function initDatabase() {
       await client.query(`ALTER TABLE source_items ADD COLUMN IF NOT EXISTS page_content TEXT`);
       await client.query(`ALTER TABLE source_items ADD COLUMN IF NOT EXISTS knowledge_base_id TEXT`);
       await client.query(`ALTER TABLE source_items ADD COLUMN IF NOT EXISTS module_id TEXT`);
+      await client.query(`ALTER TABLE source_items ADD COLUMN IF NOT EXISTS metadata TEXT`);
     } catch (err) {
       // 字段可能已存在，忽略错误
+      console.warn('添加字段时出现警告（可忽略）:', err.message);
     }
 
     // tags 表
@@ -142,19 +121,6 @@ async function initDatabase() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_items_knowledge_base_id ON source_items(knowledge_base_id)`);
     console.log('✓ 索引已创建');
 
-    // 再次检查数据完整性
-    if (hasExistingData) {
-      try {
-        const result = await client.query(`
-          SELECT COUNT(*) as count FROM source_items
-        `);
-        const finalCount = parseInt(result.rows[0]?.count || 0);
-        console.log(`✓ 数据完整性检查：数据库中现有 ${finalCount} 条记录`);
-      } catch (err) {
-        console.warn('数据完整性检查失败:', err.message);
-      }
-    }
-    
     console.log('\n✓ PostgreSQL数据库初始化完成');
     
     // 关闭连接

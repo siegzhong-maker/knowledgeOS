@@ -23,10 +23,20 @@ router.post('/analyze-document', async (req, res) => {
     const analysis = await analyzeDocument(item.raw_content || '', item.title || '', userApiKey);
     
     // 保存分析结果到数据库（可选）
-    await db.run(
-      'UPDATE source_items SET metadata = ? WHERE id = ?',
-      [JSON.stringify(analysis), docId]
-    );
+    // 注意：如果metadata列不存在，这个操作会失败，但不影响主要功能
+    try {
+      await db.run(
+        'UPDATE source_items SET metadata = ? WHERE id = ?',
+        [JSON.stringify(analysis), docId]
+      );
+    } catch (err) {
+      // 如果metadata列不存在，只记录警告，不影响主要功能
+      if (err.message && err.message.includes('metadata')) {
+        console.warn('metadata列不存在，跳过保存分析结果（不影响功能）');
+      } else {
+        throw err; // 其他错误继续抛出
+      }
+    }
 
     res.json({
       success: true,
@@ -119,7 +129,19 @@ router.post('/welcome-message', async (req, res) => {
       return res.status(400).json({ success: false, message: '文档ID不能为空' });
     }
 
-    const item = await db.get('SELECT id, title, metadata FROM source_items WHERE id = ? AND type = ?', [docId, 'pdf']);
+    // 尝试查询metadata，如果列不存在则只查询id和title
+    let item;
+    try {
+      item = await db.get('SELECT id, title, metadata FROM source_items WHERE id = ? AND type = ?', [docId, 'pdf']);
+    } catch (err) {
+      if (err.message && err.message.includes('metadata')) {
+        console.warn('metadata列不存在，使用简化查询');
+        item = await db.get('SELECT id, title FROM source_items WHERE id = ? AND type = ?', [docId, 'pdf']);
+      } else {
+        throw err;
+      }
+    }
+    
     if (!item) {
       return res.status(404).json({ success: false, message: '文档不存在' });
     }
@@ -127,8 +149,16 @@ router.post('/welcome-message', async (req, res) => {
     // 解析元数据
     let metadata = {};
     try {
-      metadata = item.metadata ? JSON.parse(item.metadata) : {};
+      // 如果item有metadata字段且不为null/undefined，尝试解析
+      if (item.metadata !== null && item.metadata !== undefined) {
+        metadata = JSON.parse(item.metadata);
+      }
     } catch (e) {
+      console.warn(`解析文档 ${docId} 的metadata失败:`, e.message);
+    }
+    
+    // 如果metadata为空，使用默认值
+    if (!metadata || Object.keys(metadata).length === 0) {
       metadata = {
         category: '通用',
         theme: item.title || '未分类',
