@@ -125,12 +125,30 @@ app.get('/api/diagnose/files', async (req, res) => {
       );
       diagnostics.database.connected = true;
       diagnostics.database.pdfCount = pdfItems.length;
-      diagnostics.database.pdfFiles = pdfItems.map(item => ({
-        id: item.id,
-        title: item.title,
-        file_path: item.file_path,
-        created_at: new Date(item.created_at).toISOString()
-      }));
+      diagnostics.database.pdfFiles = pdfItems.map(item => {
+        // 安全地处理时间戳：PostgreSQL 返回的 created_at 是 BIGINT（时间戳）
+        let createdAt = null;
+        if (item.created_at) {
+          try {
+            // 如果是数字（时间戳），直接转换
+            const timestamp = typeof item.created_at === 'number' 
+              ? item.created_at 
+              : parseInt(item.created_at, 10);
+            if (!isNaN(timestamp) && timestamp > 0) {
+              createdAt = new Date(timestamp).toISOString();
+            }
+          } catch (e) {
+            // 如果转换失败，使用原始值
+            createdAt = item.created_at.toString();
+          }
+        }
+        return {
+          id: item.id,
+          title: item.title,
+          file_path: item.file_path,
+          created_at: createdAt
+        };
+      });
       
       // 检查文件是否真的存在
       if (diagnostics.uploadsDirectory.accessible && pdfItems.length > 0) {
