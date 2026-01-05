@@ -43,6 +43,155 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true, message: '服务运行正常' });
 });
 
+// 文件系统诊断端点
+app.get('/api/diagnose/files', async (req, res) => {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const db = require('./services/db');
+    
+    const diagnostics = {
+      timestamp: new Date().toISOString(),
+      environment: {
+        NODE_ENV: process.env.NODE_ENV || '未设置',
+        UPLOADS_PATH: process.env.UPLOADS_PATH || '未设置',
+        PORT: process.env.PORT || '未设置',
+        DATABASE_URL: process.env.DATABASE_URL ? '已设置' : '未设置'
+      },
+      uploadsDirectory: {
+        path: null,
+        exists: false,
+        accessible: false,
+        writable: false,
+        fileCount: 0,
+        files: [],
+        error: null
+      },
+      database: {
+        connected: false,
+        pdfCount: 0,
+        pdfFiles: [],
+        error: null
+      },
+      recommendations: []
+    };
+    
+    // 计算上传目录路径
+    const uploadsDir = process.env.UPLOADS_PATH || 
+                       (process.env.NODE_ENV === 'production' ? '/data/uploads' : path.resolve(__dirname, 'uploads'));
+    diagnostics.uploadsDirectory.path = uploadsDir;
+    
+    // 检查上传目录
+    try {
+      await fs.access(uploadsDir);
+      diagnostics.uploadsDirectory.exists = true;
+      diagnostics.uploadsDirectory.accessible = true;
+      
+      // 尝试读取目录内容
+      try {
+        const files = await fs.readdir(uploadsDir);
+        diagnostics.uploadsDirectory.fileCount = files.length;
+        diagnostics.uploadsDirectory.files = files.slice(0, 20); // 只返回前20个文件
+        
+        // 检查目录是否可写
+        try {
+          const testFile = path.join(uploadsDir, '.test-write-' + Date.now());
+          await fs.writeFile(testFile, 'test');
+          await fs.unlink(testFile);
+          diagnostics.uploadsDirectory.writable = true;
+        } catch (writeErr) {
+          diagnostics.uploadsDirectory.writable = false;
+          diagnostics.recommendations.push('上传目录不可写，请检查目录权限');
+        }
+      } catch (readErr) {
+        diagnostics.uploadsDirectory.error = `无法读取目录内容: ${readErr.message}`;
+      }
+    } catch (accessErr) {
+      diagnostics.uploadsDirectory.exists = false;
+      diagnostics.uploadsDirectory.error = `目录不存在或不可访问: ${accessErr.message}`;
+      
+      if (process.env.NODE_ENV === 'production') {
+        diagnostics.recommendations.push('⚠️ 生产环境中 /data/uploads 目录不存在。请检查 Railway Volume 是否已配置并挂载到 /data/uploads');
+      } else {
+        diagnostics.recommendations.push('上传目录不存在，应用会自动创建');
+      }
+    }
+    
+    // 检查数据库中的PDF文件
+    try {
+      const pdfItems = await db.all(
+        'SELECT id, title, file_path, created_at FROM source_items WHERE type = ? ORDER BY created_at DESC LIMIT 10',
+        ['pdf']
+      );
+      diagnostics.database.connected = true;
+      diagnostics.database.pdfCount = pdfItems.length;
+      diagnostics.database.pdfFiles = pdfItems.map(item => ({
+        id: item.id,
+        title: item.title,
+        file_path: item.file_path,
+        created_at: new Date(item.created_at).toISOString()
+      }));
+      
+      // 检查文件是否真的存在
+      if (diagnostics.uploadsDirectory.accessible && pdfItems.length > 0) {
+        const missingFiles = [];
+        for (const item of pdfItems.slice(0, 5)) { // 只检查前5个
+          if (item.file_path) {
+            try {
+              const filePath = path.isAbsolute(item.file_path) 
+                ? item.file_path 
+                : path.join(uploadsDir, item.file_path);
+              await fs.access(filePath);
+            } catch (fileErr) {
+              missingFiles.push({
+                id: item.id,
+                title: item.title,
+                file_path: item.file_path
+              });
+            }
+          }
+        }
+        if (missingFiles.length > 0) {
+          diagnostics.recommendations.push(`⚠️ 发现 ${missingFiles.length} 个PDF文件记录，但物理文件不存在。可能原因：Volume未配置、文件已删除或路径不匹配`);
+        }
+      }
+    } catch (dbErr) {
+      diagnostics.database.error = `数据库查询失败: ${dbErr.message}`;
+      diagnostics.recommendations.push('无法查询数据库，请检查数据库连接');
+    }
+    
+    // 生成建议
+    if (process.env.NODE_ENV === 'production' && !diagnostics.uploadsDirectory.exists) {
+      diagnostics.recommendations.push('🚨 重要：生产环境中需要配置 Railway Volume');
+      diagnostics.recommendations.push('   1. 在Railway服务页面点击"Settings"');
+      diagnostics.recommendations.push('   2. 找到"Volumes"部分');
+      diagnostics.recommendations.push('   3. 点击"+ New Volume"');
+      diagnostics.recommendations.push('   4. Mount Path: /data/uploads');
+      diagnostics.recommendations.push('   5. 保存并重新部署');
+    }
+    
+    if (process.env.NODE_ENV !== 'production' && !diagnostics.uploadsDirectory.exists) {
+      diagnostics.recommendations.push('开发环境：上传目录将自动创建');
+    }
+    
+    if (diagnostics.database.pdfCount > 0 && !diagnostics.uploadsDirectory.accessible) {
+      diagnostics.recommendations.push('⚠️ 数据库中有PDF文件记录，但上传目录不可访问。这些文件可能已丢失，需要重新上传');
+    }
+    
+    res.json({
+      success: true,
+      data: diagnostics
+    });
+  } catch (error) {
+    console.error('诊断失败:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || '诊断失败',
+      error: error.stack
+    });
+  }
+});
+
 // 404处理 - API路由未找到（必须在所有API路由之后）
 app.use('/api/*', (req, res) => {
   // 记录未匹配的路由，用于调试
@@ -206,6 +355,25 @@ async function startServer() {
       const fs = require('fs').promises;
       await fs.mkdir(uploadsDir, { recursive: true });
       console.log(`✓ 上传目录已准备: ${uploadsDir}`);
+      
+      // 检查Volume挂载（生产环境）
+      if (process.env.NODE_ENV === 'production') {
+        try {
+          const stats = await fs.stat(uploadsDir);
+          console.log(`✓ Volume挂载检查: ${uploadsDir} 可访问`);
+          
+          // 列出目录中的文件数量（用于诊断）
+          try {
+            const files = await fs.readdir(uploadsDir);
+            console.log(`✓ Volume文件检查: 发现 ${files.length} 个文件/目录`);
+          } catch (readErr) {
+            console.warn('读取上传目录内容失败:', readErr.message);
+          }
+        } catch (statErr) {
+          console.error(`⚠️  Volume挂载警告: ${uploadsDir} 可能未正确挂载`);
+          console.error('   请检查Railway Volume配置，挂载路径应为: /data/uploads');
+        }
+      }
     } catch (error) {
       console.warn('上传目录检查失败（可能不影响功能）:', error.message);
     }
