@@ -15,15 +15,23 @@ async function getUserApiKey() {
 }
 
 async function apiRequest(endpoint, options = {}) {
-  const url = `${API_BASE}${endpoint}`;
-  
   // 获取用户API Key
   const userApiKey = await getUserApiKey();
+  
+  // 处理URL和查询参数
+  let url = `${API_BASE}${endpoint}`;
+  const method = (options.method || 'GET').toUpperCase();
+  
+  // 对于GET请求，通过query参数传递userApiKey
+  if (method === 'GET' && userApiKey) {
+    const separator = endpoint.includes('?') ? '&' : '?';
+    url = `${url}${separator}userApiKey=${encodeURIComponent(userApiKey)}`;
+  }
   
   // 准备请求体
   let body = options.body;
   if (body && typeof body === 'object') {
-    // 如果用户已配置API Key，添加到请求体
+    // 如果用户已配置API Key，添加到请求体（POST/PUT等请求）
     if (userApiKey) {
       body.userApiKey = userApiKey;
     }
@@ -421,5 +429,95 @@ export const consultationAPI = {
 export const contextAPI = {
   getActive: () => apiRequest('/contexts/active'),
   update: (data) => apiRequest('/contexts/active', { method: 'PUT', body: data })
+};
+
+// 知识库提取API
+export const knowledgeAPI = {
+  // 提取知识
+  extract: (itemIds, knowledgeBaseId, extractionOptions = {}) => {
+    return apiRequest('/knowledge/extract', {
+      method: 'POST',
+      body: { itemIds, knowledgeBaseId, extractionOptions }
+    });
+  },
+  
+  // 获取提取状态
+  getExtractionStatus: (extractionId) => {
+    return apiRequest(`/knowledge/extract/${extractionId}/status`);
+  },
+  
+  // 获取知识列表
+  getItems: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`/knowledge/items?${query}`);
+  },
+  
+  // 获取知识点详情
+  getItemById: (id) => {
+    return apiRequest(`/knowledge/items/${id}`);
+  },
+  
+  // 创建知识点（手动）
+  createItem: (data) => {
+    return apiRequest('/knowledge/items', {
+      method: 'POST',
+      body: data
+    });
+  },
+  
+  // 更新知识点
+  updateItem: (id, data) => {
+    return apiRequest(`/knowledge/items/${id}`, {
+      method: 'PUT',
+      body: data
+    });
+  },
+  
+  // 删除知识点
+  deleteItem: (id) => {
+    return apiRequest(`/knowledge/items/${id}`, {
+      method: 'DELETE'
+    });
+  },
+  
+  // 获取相关知识
+  getRelatedKnowledge: (id, limit = 5, minSimilarity = 60) => {
+    return apiRequest(`/knowledge/items/${id}/related?limit=${limit}&minSimilarity=${minSimilarity}`);
+  },
+  
+  // 获取知识图谱数据
+  getGraphData: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`/knowledge/graph?${query}`);
+  },
+  
+  // 获取子分类列表
+  getSubcategories: (category = null) => {
+    const query = category ? `?category=${category}` : '';
+    return apiRequest(`/knowledge/subcategories${query}`);
+  },
+  
+  // 创建子分类
+  createSubcategory: (data) => {
+    return apiRequest('/knowledge/subcategories', {
+      method: 'POST',
+      body: data
+    });
+  },
+  
+  // 更新子分类
+  updateSubcategory: (id, data) => {
+    return apiRequest(`/knowledge/subcategories/${id}`, {
+      method: 'PUT',
+      body: data
+    });
+  },
+  
+  // 删除子分类
+  deleteSubcategory: (id) => {
+    return apiRequest(`/knowledge/subcategories/${id}`, {
+      method: 'DELETE'
+    });
+  }
 };
 

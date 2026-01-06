@@ -35,6 +35,7 @@ app.use('/api/consultation', require('./routes/consultation'));
 app.use('/api/contexts', require('./routes/context'));
 app.use('/api/modules', require('./routes/modules'));
 app.use('/api/knowledge-bases', require('./routes/knowledge-bases'));
+app.use('/api/knowledge', require('./routes/knowledge'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/migrate', require('./routes/migrate'));
 

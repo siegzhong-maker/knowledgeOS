@@ -22,6 +22,8 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
   <!-- PDF.js for PDF rendering -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- D3.js for knowledge graph -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script>
     // 配置PDF.js Worker（必须在PDF.js加载后立即配置）
     if (typeof pdfjsLib !== 'undefined') {
@@ -501,14 +503,47 @@
       </div>
 
       <nav class="mt-6 px-4 space-y-2">
+        <!-- 第一个：文档库 -->
+        <button
+          data-view="repository"
+          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
+        >
+          <i
+            class="fa-solid fa-layer-group w-6 text-center text-lg mr-2"
+          ></i>
+          <span>文档库</span>
+        </button>
+        <!-- 第二个：知识库 -->
+        <button
+          data-view="knowledge-items"
+          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
+        >
+          <div class="w-6 h-6 flex items-center justify-center mr-2">
+            <i data-lucide="sparkles" size="18" class="text-slate-300 group-hover:text-white"></i>
+          </div>
+          <span>知识库</span>
+        </button>
+        <!-- 第三个：智能问答 -->
         <button
           data-view="consultation"
-          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium bg-slate-800 text-white rounded-lg transition-all hover:translate-x-1"
+          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
         >
           <i
             class="fa-solid fa-comments text-indigo-400 w-6 text-center text-lg mr-2"
           ></i>
-          <span>咨询工作台</span>
+          <span>智能问答</span>
+        </button>
+        <!-- 分隔线 -->
+        <div class="my-2 border-t border-slate-700"></div>
+        <!-- 第四个：归档 -->
+        <button
+          data-view="archive"
+          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
+        >
+          <i
+            class="fa-solid fa-archive w-6 text-center text-lg mr-2"
+          ></i>
+          <span>归档</span>
         </button>
         <button
           data-view="dashboard"
@@ -518,24 +553,6 @@
             class="fa-solid fa-grid-2 w-6 text-center text-lg mr-2"
           ></i>
           <span>工作台</span>
-        </button>
-        <button
-          data-view="repository"
-          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
-        >
-          <i
-            class="fa-solid fa-layer-group w-6 text-center text-lg mr-2"
-          ></i>
-          <span>知识库</span>
-        </button>
-        <button
-          data-view="archive"
-          class="nav-item group flex items-center w-full text-left px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all hover:translate-x-1"
-        >
-          <i
-            class="fa-solid fa-archive w-6 text-center text-lg mr-2"
-          ></i>
-          <span>归档</span>
         </button>
         <button
           data-view="tags"
@@ -584,41 +601,6 @@
       class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-8 shadow-sm z-10 flex-shrink-0"
     >
       <div class="w-8 lg:hidden"></div>
-      <div class="flex-1 max-w-2xl mx-auto lg:mx-0 flex gap-2">
-        <div class="relative group flex-1">
-          <div
-            class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-          >
-            <i
-              class="fa-solid fa-search text-slate-400 group-focus-within:text-indigo-500 transition-colors"
-            ></i>
-          </div>
-          <input
-            type="text"
-            id="global-search"
-            class="block w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all sm:text-sm shadow-sm"
-            placeholder="搜索标题、内容、标签..."
-          />
-        </div>
-        <div class="relative group">
-          <div
-            class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-          >
-            <i
-              class="fa-solid fa-plus text-slate-400 group-focus-within:text-indigo-500 transition-colors"
-            ></i>
-          </div>
-          <input
-            type="text"
-            id="quick-input"
-            class="block w-full pl-10 pr-20 py-2.5 border border-indigo-200 rounded-xl leading-5 bg-indigo-50/50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all sm:text-sm shadow-sm"
-            placeholder="粘贴URL或输入文本，回车导入..."
-          />
-          <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-            <span class="text-xs text-slate-400 hidden sm:inline">Enter</span>
-          </div>
-        </div>
-      </div>
       <div class="ml-4 flex items-center space-x-3 lg:space-x-5">
         <div
           id="api-pill"
@@ -929,7 +911,7 @@
         class="view-section hidden p-6 lg:p-10 max-w-7xl mx-auto"
       >
         <div class="flex justify-between items-center mb-6">
-          <h1 class="text-2xl font-bold text-slate-900">知识库</h1>
+          <h1 class="text-2xl font-bold text-slate-900">文档库</h1>
           <div class="flex gap-2" id="repo-status-filters">
             <button
               data-status-filter="all"
@@ -1126,6 +1108,99 @@
           id="tags-container"
         >
           <!-- 标签云由 JS 渲染 -->
+        </div>
+      </section>
+
+      <!-- Knowledge Items (知识库) -->
+      <section
+        id="view-knowledge-items"
+        class="view-section hidden p-6 lg:p-10 max-w-7xl mx-auto"
+      >
+        <!-- Header -->
+        <header class="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between flex-shrink-0 mb-6 rounded-lg">
+          <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200">
+                <i data-lucide="sparkles" class="text-white" size="20"></i>
+              </div>
+              <h1 class="text-xl font-bold text-slate-800">知识库</h1>
+            </div>
+            <span class="bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded-full" id="knowledge-items-count">
+              0 条目
+            </span>
+          </div>
+
+          <div class="flex items-center space-x-4">
+            <div class="relative">
+              <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size="16"></i>
+              <input 
+                type="text" 
+                id="knowledge-search-input"
+                placeholder="搜索知识点..." 
+                class="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white w-64 transition-all"
+              />
+            </div>
+            <button id="knowledge-filter-btn" class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg relative">
+              <i data-lucide="filter" size="20"></i>
+            </button>
+          </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="flex flex-col gap-4 mb-6">
+          <!-- 状态筛选 -->
+          <div class="flex items-center space-x-2" id="knowledge-status-filters">
+            <button 
+              data-filter="all"
+              class="knowledge-filter-btn px-3 py-1.5 rounded-full text-sm font-medium transition-colors bg-slate-800 text-white"
+            >
+              全部
+            </button>
+            <button 
+              data-filter="confirmed"
+              class="knowledge-filter-btn px-3 py-1.5 rounded-full text-sm font-medium transition-colors bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+            >
+              已确认
+            </button>
+            <button 
+              data-filter="pending"
+              class="knowledge-filter-btn px-3 py-1.5 rounded-full text-sm font-medium transition-colors bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+            >
+              待审核
+            </button>
+          </div>
+          
+          <!-- 分类筛选 -->
+          <div class="flex items-center gap-2 flex-wrap" id="knowledge-category-filters">
+            <!-- 分类筛选按钮将由 knowledge-items.js 动态生成 -->
+          </div>
+        </div>
+
+        <!-- 视图切换器 -->
+        <div class="flex items-center justify-end gap-2 mb-4">
+          <div class="flex items-center bg-slate-100 rounded-lg p-1">
+            <button
+              id="view-mode-grid"
+              data-view-mode="grid"
+              class="view-mode-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors bg-white text-slate-700 shadow-sm"
+              title="网格视图"
+            >
+              <i data-lucide="grid-3x3" size="16"></i>
+            </button>
+            <button
+              id="view-mode-timeline"
+              data-view-mode="timeline"
+              class="view-mode-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors text-slate-500 hover:text-slate-700"
+              title="时间线视图"
+            >
+              <i data-lucide="list" size="16"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Content Area (由 knowledge-items.js 渲染) -->
+        <div id="view-knowledge-items-content">
+          <!-- 知识卡片网格将在这里渲染 -->
         </div>
       </section>
 
