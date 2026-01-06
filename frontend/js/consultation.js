@@ -2553,6 +2553,9 @@ export async function regenerateMessage(messageId) {
       }
     });
     
+    // 重新渲染历史消息（确保之前的消息都显示）
+    renderHistory();
+    
     // 重新发送用户消息
     await handleConversation(userMessageContent);
     
