@@ -58,20 +58,41 @@ router.post('/analyze-document', async (req, res) => {
 // 根据用户问题匹配最相关的文档
 router.post('/match-document', async (req, res) => {
   try {
-    const { question } = req.body;
+    const { question, currentKnowledgeBaseId, searchAllBases } = req.body;
     
     if (!question) {
       return res.status(400).json({ success: false, message: '问题不能为空' });
     }
 
-    // 获取所有PDF文档
-    const items = await db.all('SELECT id, title, metadata FROM source_items WHERE type = ? AND status != ?', ['pdf', 'archived']);
+    // 构建查询：根据知识库过滤
+    let query = 'SELECT id, title, metadata, knowledge_base_id FROM source_items WHERE type = ? AND status != ?';
+    const params = ['pdf', 'archived'];
+    
+    // 如果指定了当前知识库且不搜索所有知识库，只搜索当前知识库
+    if (currentKnowledgeBaseId && searchAllBases !== true) {
+      query += ' AND knowledge_base_id = ?';
+      params.push(currentKnowledgeBaseId);
+    }
+    
+    // 获取PDF文档（可能按知识库过滤）
+    const items = await db.all(query, params);
     
     if (!items || items.length === 0) {
       return res.json({
         success: true,
         data: { docId: null, relevance: 0, reason: '没有可用文档' }
       });
+    }
+
+    // 获取知识库信息（用于返回知识库名称）
+    const knowledgeBasesMap = new Map();
+    try {
+      const knowledgeBases = await db.all('SELECT id, name FROM knowledge_bases');
+      knowledgeBases.forEach(kb => {
+        knowledgeBasesMap.set(kb.id, kb.name);
+      });
+    } catch (e) {
+      console.warn('获取知识库信息失败:', e);
     }
 
     // 解析文档元数据
@@ -93,22 +114,102 @@ router.post('/match-document', async (req, res) => {
       return {
         id: item.id,
         title: item.title,
+        knowledgeBaseId: item.knowledge_base_id || null,
+        knowledgeBaseName: item.knowledge_base_id ? (knowledgeBasesMap.get(item.knowledge_base_id) || '未知知识库') : null,
         ...metadata
       };
     });
 
     // 匹配文档
     const userApiKey = req.body.userApiKey || null;
-    const match = await matchDocument(question, documents, userApiKey);
+    let match = await matchDocument(question, documents, userApiKey);
+    
+    // 如果当前知识库没有匹配（相关度 < 30）且允许搜索所有知识库，尝试搜索所有知识库
+    if (currentKnowledgeBaseId && searchAllBases !== true && match.relevance < 30) {
+      // 重新查询所有知识库的文档
+      const allItems = await db.all('SELECT id, title, metadata, knowledge_base_id FROM source_items WHERE type = ? AND status != ?', ['pdf', 'archived']);
+      
+      if (allItems && allItems.length > 0) {
+        const allDocuments = allItems.map(item => {
+          let metadata = {};
+          try {
+            metadata = item.metadata ? JSON.parse(item.metadata) : {};
+          } catch (e) {
+            metadata = {
+              category: '通用',
+              theme: item.title || '未分类',
+              description: '',
+              keywords: [],
+              role: '知识助手'
+            };
+          }
+          
+          return {
+            id: item.id,
+            title: item.title,
+            knowledgeBaseId: item.knowledge_base_id || null,
+            knowledgeBaseName: item.knowledge_base_id ? (knowledgeBasesMap.get(item.knowledge_base_id) || '未知知识库') : null,
+            ...metadata
+          };
+        });
+        
+        // 在所有知识库中匹配
+        const allMatch = await matchDocument(question, allDocuments, userApiKey);
+        
+        // 如果全库匹配的相关度更高，使用全库匹配结果
+        if (allMatch.relevance > match.relevance) {
+          match = allMatch;
+        }
+      }
+    }
     
     // 获取匹配的文档信息
     const matchedDoc = documents.find(doc => doc.id === match.docId);
+    if (!matchedDoc && match.docId) {
+      // 如果当前文档列表中没有找到，可能是从全库搜索中找到的，需要重新查询
+      const matchedItem = await db.get('SELECT id, title, metadata, knowledge_base_id FROM source_items WHERE id = ?', [match.docId]);
+      if (matchedItem) {
+        let metadata = {};
+        try {
+          metadata = matchedItem.metadata ? JSON.parse(matchedItem.metadata) : {};
+        } catch (e) {
+          metadata = {
+            category: '通用',
+            theme: matchedItem.title || '未分类',
+            description: '',
+            keywords: [],
+            role: '知识助手'
+          };
+        }
+        
+        const matchedDocInfo = {
+          id: matchedItem.id,
+          title: matchedItem.title,
+          knowledgeBaseId: matchedItem.knowledge_base_id || null,
+          knowledgeBaseName: matchedItem.knowledge_base_id ? (knowledgeBasesMap.get(matchedItem.knowledge_base_id) || '未知知识库') : null,
+          ...metadata
+        };
+        
+        res.json({
+          success: true,
+          data: {
+            ...match,
+            docInfo: matchedDocInfo,
+            knowledgeBaseId: matchedDocInfo.knowledgeBaseId,
+            knowledgeBaseName: matchedDocInfo.knowledgeBaseName
+          }
+        });
+        return;
+      }
+    }
     
     res.json({
       success: true,
       data: {
         ...match,
-        docInfo: matchedDoc || null
+        docInfo: matchedDoc || null,
+        knowledgeBaseId: matchedDoc?.knowledgeBaseId || null,
+        knowledgeBaseName: matchedDoc?.knowledgeBaseName || null
       }
     });
   } catch (error) {

@@ -247,10 +247,10 @@ export const consultationAPI = {
   },
   
   // 匹配文档
-  matchDocument: async (question) => {
+  matchDocument: async (question, currentKnowledgeBaseId = null, searchAllBases = false) => {
     return apiRequest('/consultation/match-document', {
       method: 'POST',
-      body: { question }
+      body: { question, currentKnowledgeBaseId, searchAllBases }
     });
   },
   

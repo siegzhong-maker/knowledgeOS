@@ -103,7 +103,11 @@ const state = {
   conversationsCacheTimestamp: 0, // 缓存时间戳
   migrationChecked: new Set(), // 已检查迁移的文档ID集合
   expandedDocs: new Set(), // 已展开对话列表的文档ID集合
-  pdfViewerInstance: null // PDF.js查看器实例
+  pdfViewerInstance: null, // PDF.js查看器实例
+  // 分支相关
+  baseMessages: [], // 分支点之前的消息（所有分支共享）
+  branches: [], // 分支列表 [{ branchId, version, branchPoint, messages, docIds, knowledgeBaseIds, createdAt }]
+  currentBranchId: null // 当前显示的分支ID
 };
 
 // 加载PDF列表
@@ -1257,15 +1261,43 @@ export async function handleConversation(text) {
   // 如果没有当前文档，尝试匹配
   if (!state.currentDocId && state.pdfList.length > 0) {
     try {
-      const matchResult = await consultationAPI.matchDocument(text);
+      // 获取当前知识库ID
+      let currentKnowledgeBaseId = null;
+      try {
+        const kbModule = await import('./knowledge-bases.js');
+        const currentKb = kbModule.getCurrentKnowledgeBase();
+        if (currentKb) {
+          currentKnowledgeBaseId = currentKb.id;
+        }
+      } catch (e) {
+        console.warn('获取当前知识库ID失败:', e);
+      }
+      
+      // 先尝试在当前知识库中匹配
+      let matchResult = await consultationAPI.matchDocument(text, currentKnowledgeBaseId, false);
+      
+      // 如果当前知识库没有匹配（相关度 < 30），自动扩展到所有知识库
+      if (matchResult.success && matchResult.data.relevance < 30) {
+        matchResult = await consultationAPI.matchDocument(text, currentKnowledgeBaseId, true);
+      }
+      
       if (matchResult.success && matchResult.data.docId) {
         await loadDoc(matchResult.data.docId, false);
-        state.currentDocInfo = matchResult.data.docInfo;
+        state.currentDocInfo = {
+          ...matchResult.data.docInfo,
+          knowledgeBaseId: matchResult.data.knowledgeBaseId || matchResult.data.docInfo?.knowledgeBaseId,
+          knowledgeBaseName: matchResult.data.knowledgeBaseName || matchResult.data.docInfo?.knowledgeBaseName
+        };
         updateModeDisplay();
         
         // 如果匹配成功，添加提示消息
         if (matchResult.data.relevance > 50) {
-          addAiMessage(`我已经为您找到了相关的参考文档《${matchResult.data.docInfo?.title || '文档'}》。让我基于这个文档为您解答。`);
+          const kbName = matchResult.data.knowledgeBaseName ? `（来自知识库：${matchResult.data.knowledgeBaseName}）` : '';
+          addAiMessage(`我已经为您找到了相关的参考文档《${matchResult.data.docInfo?.title || '文档'}》${kbName}。让我基于这个文档为您解答。`);
+        } else if (matchResult.data.knowledgeBaseId && matchResult.data.knowledgeBaseId !== currentKnowledgeBaseId) {
+          // 如果匹配到其他知识库的文档，提示用户
+          const kbName = matchResult.data.knowledgeBaseName || '其他知识库';
+          addAiMessage(`我在${kbName}中找到了相关文档《${matchResult.data.docInfo?.title || '文档'}》，将基于此文档为您解答。`);
         }
       }
     } catch (error) {
@@ -1336,11 +1368,13 @@ export async function handleConversation(text) {
           if (chunk.citations && Array.isArray(chunk.citations) && chunk.citations.length > 0) {
             // 合并引用，去重
             chunk.citations.forEach(citation => {
-              // 确保引用有docId和docTitle
+              // 确保引用有docId、docTitle和知识库信息
               const citationWithDoc = {
                 ...citation,
                 docId: citation.docId || state.currentDocId || null,
-                docTitle: citation.docTitle || citation.docName || state.currentDoc?.title || '文档'
+                docTitle: citation.docTitle || citation.docName || state.currentDoc?.title || '文档',
+                knowledgeBaseId: citation.knowledgeBaseId || state.currentDocInfo?.knowledgeBaseId || null,
+                knowledgeBaseName: citation.knowledgeBaseName || state.currentDocInfo?.knowledgeBaseName || null
               };
               
               const exists = allCitations.find(c => 
@@ -1398,14 +1432,39 @@ export async function handleConversation(text) {
     }
     
     // 保存到历史
-    state.history.push({ role: 'user', content: text });
-    state.history.push({ 
+    const userMessage = { role: 'user', content: text };
+    const assistantMessage = { 
       role: 'assistant', 
       content: fullResponse, 
       citations: allCitations,
       evaluation: evaluationResult, // 保存评估结果
-      docId: state.currentDocId // 保存文档ID
-    });
+      docId: state.currentDocId, // 保存文档ID
+      docInfo: state.currentDocInfo ? {
+        ...state.currentDocInfo,
+        docId: state.currentDocId,
+        knowledgeBaseId: state.currentDocInfo.knowledgeBaseId,
+        knowledgeBaseName: state.currentDocInfo.knowledgeBaseName
+      } : null
+    };
+    
+    state.history.push(userMessage);
+    state.history.push(assistantMessage);
+    
+    // 如果有当前分支，更新分支消息
+    if (state.currentBranchId && state.branches && state.branches.length > 0) {
+      const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+      if (currentBranch) {
+        // 计算分支消息的起始索引（baseMessages的长度）
+        const branchStartIndex = state.baseMessages.length;
+        // 获取从分支点开始的消息（包括新添加的消息）
+        const branchMessages = state.history.slice(branchStartIndex);
+        currentBranch.messages = branchMessages;
+        // 更新分支的文档和知识库ID
+        currentBranch.docIds = extractDocIdsFromMessages(branchMessages);
+        currentBranch.knowledgeBaseIds = extractKnowledgeBaseIdsFromMessages(branchMessages);
+      }
+    }
+    
     await saveHistory();
     
     // 更新历史对话列表
@@ -1543,6 +1602,34 @@ function renderCitations(citations, messageId) {
     return '';
   }
   
+  // 获取当前知识库ID（用于判断是否需要显示知识库标签）
+  let currentKnowledgeBaseId = null;
+  try {
+    // 尝试从state.currentDocInfo获取
+    if (state.currentDocInfo && state.currentDocInfo.knowledgeBaseId) {
+      currentKnowledgeBaseId = state.currentDocInfo.knowledgeBaseId;
+    }
+  } catch (e) {
+    // 忽略错误
+  }
+  
+  // 知识库颜色映射（不同知识库使用不同颜色）
+  const kbColors = {
+    default: { bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-200' },
+    kb1: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+    kb2: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' },
+    kb3: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
+    kb4: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' }
+  };
+  
+  // 根据知识库ID生成颜色（简单哈希）
+  function getKbColor(kbId) {
+    if (!kbId) return kbColors.default;
+    const hash = kbId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const colors = Object.values(kbColors);
+    return colors[hash % colors.length] || kbColors.default;
+  }
+  
   const citationCards = citations.map((citation, index) => {
     const docTitle = citation.docTitle || state.currentDoc?.title || '文档';
     const pageNum = citation.page || 1;
@@ -1554,11 +1641,18 @@ function renderCitations(citations, messageId) {
     // 转义文本用于HTML属性
     const escapedText = (citation.text || '').replace(/'/g, "\\'").replace(/\n/g, ' ').substring(0, 100);
     
+    // 获取知识库信息
+    const kbId = citation.knowledgeBaseId || null;
+    const kbName = citation.knowledgeBaseName || null;
+    const showKbLabel = kbId && kbId !== currentKnowledgeBaseId;
+    const kbColor = showKbLabel ? getKbColor(kbId) : null;
+    
     return `
       <div class="citation-card" data-citation-id="${index}" data-page="${pageNum}" data-doc-id="${actualDocId}">
         <div class="citation-header">
           <i data-lucide="file-text" size="14" class="text-slate-400"></i>
           <span class="doc-name">${escapeHtml(docTitle)}</span>
+          ${showKbLabel && kbName ? `<span class="kb-badge ${kbColor.bg} ${kbColor.text} ${kbColor.border} border px-1.5 py-0.5 rounded text-[10px] font-medium ml-1">${escapeHtml(kbName)}</span>` : ''}
           <span class="page-badge">P.${pageNum}</span>
         </div>
         <div class="citation-preview">"${escapeHtml(previewText)}"</div>
@@ -2402,6 +2496,42 @@ async function openSettingsModalFromConsultation() {
   }
 }
 
+// 从消息中提取文档ID列表
+function extractDocIdsFromMessages(messages) {
+  const docIds = new Set();
+  messages.forEach(msg => {
+    if (msg.citations && Array.isArray(msg.citations)) {
+      msg.citations.forEach(citation => {
+        if (citation.docId) {
+          docIds.add(citation.docId);
+        }
+      });
+    }
+    if (msg.docInfo && msg.docInfo.docId) {
+      docIds.add(msg.docInfo.docId);
+    }
+  });
+  return Array.from(docIds);
+}
+
+// 从消息中提取知识库ID列表
+function extractKnowledgeBaseIdsFromMessages(messages) {
+  const kbIds = new Set();
+  messages.forEach(msg => {
+    if (msg.citations && Array.isArray(msg.citations)) {
+      msg.citations.forEach(citation => {
+        if (citation.knowledgeBaseId) {
+          kbIds.add(citation.knowledgeBaseId);
+        }
+      });
+    }
+    if (msg.docInfo && msg.docInfo.knowledgeBaseId) {
+      kbIds.add(msg.docInfo.knowledgeBaseId);
+    }
+  });
+  return Array.from(kbIds);
+}
+
 // 重新生成消息
 export async function regenerateMessage(messageId) {
   try {
@@ -2515,7 +2645,7 @@ export async function regenerateMessage(messageId) {
       return;
     }
     
-    // 在state.history中找到对应的消息对并移除
+    // 在state.history中找到对应的消息对（分支点）
     // 从后往前查找，找到最后一个匹配的用户消息
     let foundUserIndex = -1;
     for (let i = state.history.length - 1; i >= 0; i--) {
@@ -2533,12 +2663,72 @@ export async function regenerateMessage(messageId) {
     if (foundUserIndex === -1) {
       console.error('在历史记录中找不到对应的消息');
       // 仍然尝试重新生成，使用找到的用户消息内容
-    } else {
-      // 移除用户消息和AI回复（从foundUserIndex开始的两个消息）
-      state.history.splice(foundUserIndex, 2);
+      await handleConversation(userMessageContent);
+      return;
     }
     
-    // 从DOM中移除用户消息和AI消息
+    // 分支逻辑：创建新分支而不是删除消息
+    // 1. 确定分支点（用户消息的索引）
+    const branchPoint = foundUserIndex;
+    
+    // 2. 如果还没有分支结构，初始化
+    if (!state.branches || state.branches.length === 0) {
+      // 将分支点之前的消息保存为baseMessages
+      state.baseMessages = state.history.slice(0, branchPoint);
+      // 创建第一个分支（当前分支）
+      const firstBranchId = `branch-${Date.now()}-1`;
+      const branchMessages = state.history.slice(branchPoint); // 从分支点开始的所有消息
+      state.branches = [{
+        branchId: firstBranchId,
+        version: 1,
+        branchPoint: branchPoint,
+        messages: branchMessages,
+        docIds: extractDocIdsFromMessages(branchMessages),
+        knowledgeBaseIds: extractKnowledgeBaseIdsFromMessages(branchMessages),
+        createdAt: Date.now()
+      }];
+      state.currentBranchId = firstBranchId;
+    } else {
+      // 已有分支：保存当前分支，创建新分支
+      // 找到当前分支
+      const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+      if (currentBranch) {
+        // 更新当前分支的消息（从分支点开始的所有消息）
+        const branchMessages = state.history.slice(branchPoint);
+        currentBranch.messages = branchMessages;
+        currentBranch.docIds = extractDocIdsFromMessages(branchMessages);
+        currentBranch.knowledgeBaseIds = extractKnowledgeBaseIdsFromMessages(branchMessages);
+      }
+      
+      // 创建新分支
+      const maxVersion = Math.max(...state.branches.map(b => b.version), 0);
+      const newVersion = maxVersion + 1;
+      const newBranchId = `branch-${Date.now()}-${newVersion}`;
+      
+      // 新分支从分支点开始，但消息为空（等待重新生成）
+      const newBranch = {
+        branchId: newBranchId,
+        version: newVersion,
+        branchPoint: branchPoint,
+        messages: [], // 初始为空，等待重新生成
+        docIds: [],
+        knowledgeBaseIds: [],
+        createdAt: Date.now()
+      };
+      
+      state.branches.push(newBranch);
+      state.currentBranchId = newBranchId;
+      
+      // 更新baseMessages（确保包含分支点之前的消息）
+      if (state.baseMessages.length < branchPoint) {
+        state.baseMessages = state.history.slice(0, branchPoint);
+      }
+    }
+    
+    // 3. 更新state.history为baseMessages（新分支还没有消息）
+    state.history = [...state.baseMessages];
+    
+    // 4. 从DOM中移除用户消息和AI消息（从分支点开始的消息）
     const messagesToRemove = [];
     if (userMessageIndex >= 0) {
       messagesToRemove.push(userMessageEl);
@@ -2553,10 +2743,10 @@ export async function regenerateMessage(messageId) {
       }
     });
     
-    // 重新渲染历史消息（确保之前的消息都显示）
+    // 5. 重新渲染历史消息（显示baseMessages）
     renderHistory();
     
-    // 重新发送用户消息
+    // 6. 重新发送用户消息（这将创建新分支的消息）
     await handleConversation(userMessageContent);
     
   } catch (error) {
@@ -2565,6 +2755,134 @@ export async function regenerateMessage(messageId) {
     addAiMessage(`❌ **重新生成失败**：${errorMsg}`);
   }
 }
+
+// 切换分支
+export async function switchBranch(branchId) {
+  if (!state.branches || state.branches.length === 0) {
+    console.warn('没有分支可切换');
+    return;
+  }
+  
+  const targetBranch = state.branches.find(b => b.branchId === branchId);
+  if (!targetBranch) {
+    console.warn('找不到目标分支:', branchId);
+    return;
+  }
+  
+  // 保存当前分支（如果有）
+  if (state.currentBranchId) {
+    const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+    if (currentBranch) {
+      // 更新当前分支的消息
+      const branchStartIndex = state.baseMessages.length;
+      const branchMessages = state.history.slice(branchStartIndex);
+      currentBranch.messages = branchMessages;
+      currentBranch.docIds = extractDocIdsFromMessages(branchMessages);
+      currentBranch.knowledgeBaseIds = extractKnowledgeBaseIdsFromMessages(branchMessages);
+    }
+  }
+  
+  // 切换到目标分支
+  state.currentBranchId = branchId;
+  
+  // 构建新的历史消息：baseMessages + 目标分支的消息
+  state.history = [...state.baseMessages, ...targetBranch.messages];
+  
+  // 保存历史
+  await saveHistory();
+  
+  // 重新渲染历史消息
+  renderHistory();
+  
+  // 滚动到底部
+  scrollToBottom();
+}
+
+// 渲染分支切换器
+function renderBranchSwitcher(branchPoint) {
+  if (!state.branches || state.branches.length === 0) {
+    return '';
+  }
+  
+  // 找到该分支点的所有分支
+  const branchesAtPoint = state.branches.filter(b => b.branchPoint === branchPoint);
+  if (branchesAtPoint.length <= 1) {
+    return ''; // 只有一个分支，不需要显示切换器
+  }
+  
+  // 按版本号排序
+  branchesAtPoint.sort((a, b) => a.version - b.version);
+  
+  const currentBranch = branchesAtPoint.find(b => b.branchId === state.currentBranchId);
+  const currentVersion = currentBranch ? currentBranch.version : branchesAtPoint[branchesAtPoint.length - 1].version;
+  
+  // 生成分支选项HTML
+  const branchOptions = branchesAtPoint.map(branch => {
+    const isCurrent = branch.branchId === state.currentBranchId;
+    return `
+      <button
+        onclick="switchBranch('${branch.branchId}')"
+        class="w-full px-3 py-2 text-left text-sm ${isCurrent ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'} rounded transition-colors"
+      >
+        <div class="flex items-center justify-between">
+          <span>版本${branch.version}</span>
+          ${isCurrent ? '<i data-lucide="check" size="14" class="text-indigo-600"></i>' : ''}
+        </div>
+      </button>
+    `;
+  }).join('');
+  
+  return `
+    <div class="branch-switcher relative inline-block">
+      <button
+        onclick="toggleBranchSwitcher('branch-switcher-${branchPoint}')"
+        class="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors flex items-center gap-1"
+        title="切换版本"
+      >
+        <i data-lucide="git-branch" size="12"></i>
+        <span>版本${currentVersion}</span>
+        <i data-lucide="chevron-down" size="10"></i>
+      </button>
+      <div
+        id="branch-switcher-${branchPoint}"
+        class="hidden absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[120px] py-1"
+      >
+        ${branchOptions}
+      </div>
+    </div>
+  `;
+}
+
+// 切换分支切换器显示/隐藏
+window.toggleBranchSwitcher = function(switcherId) {
+  const switcher = document.getElementById(switcherId);
+  if (!switcher) return;
+  
+  // 关闭其他分支切换器
+  document.querySelectorAll('[id^="branch-switcher-"]').forEach(el => {
+    if (el.id !== switcherId) {
+      el.classList.add('hidden');
+    }
+  });
+  
+  switcher.classList.toggle('hidden');
+  
+  // 点击外部关闭
+  if (!switcher.classList.contains('hidden')) {
+    const closeHandler = (e) => {
+      if (!switcher.contains(e.target) && !e.target.closest('.branch-switcher')) {
+        switcher.classList.add('hidden');
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeHandler);
+    }, 10);
+  }
+};
+
+// 切换分支（全局函数）
+window.switchBranch = switchBranch;
 
 // 切换右侧面板
 export function toggleRightPanel() {
@@ -3256,7 +3574,29 @@ export async function loadConversationFromHistory(indexOrId) {
   }
   
   // 加载对话到当前状态
-  state.history = conversation.messages;
+  // 向后兼容：如果没有分支信息，使用旧格式
+  if (conversation.branches && conversation.branches.length > 0) {
+    // 有分支：加载分支信息
+    state.baseMessages = conversation.baseMessages || [];
+    state.branches = conversation.branches || [];
+    state.currentBranchId = conversation.currentBranchId || (conversation.branches.length > 0 ? conversation.branches[conversation.branches.length - 1].branchId : null);
+    
+    // 构建当前显示的消息：baseMessages + 当前分支的消息
+    const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+    if (currentBranch) {
+      state.history = [...state.baseMessages, ...currentBranch.messages];
+    } else {
+      // 如果没有找到当前分支，使用第一个分支或baseMessages
+      state.history = state.baseMessages.length > 0 ? [...state.baseMessages] : conversation.messages;
+    }
+  } else {
+    // 没有分支：使用旧格式，初始化分支结构
+    state.baseMessages = [];
+    state.branches = [];
+    state.currentBranchId = null;
+    state.history = conversation.messages || [];
+  }
+  
   state.currentConversationId = conversation.id;
   
   // 更新存储中的当前对话ID
@@ -3756,7 +4096,28 @@ export async function loadHistory() {
       if (targetConversationId) {
         const conversation = conversations.find(c => c.id === targetConversationId);
         if (conversation && conversation.messages) {
-          state.history = conversation.messages;
+          // 向后兼容：如果没有分支信息，使用旧格式
+          if (conversation.branches && conversation.branches.length > 0) {
+            // 有分支：加载分支信息
+            state.baseMessages = conversation.baseMessages || [];
+            state.branches = conversation.branches || [];
+            state.currentBranchId = conversation.currentBranchId || (conversation.branches.length > 0 ? conversation.branches[conversation.branches.length - 1].branchId : null);
+            
+            // 构建当前显示的消息：baseMessages + 当前分支的消息
+            const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+            if (currentBranch) {
+              state.history = [...state.baseMessages, ...currentBranch.messages];
+            } else {
+              state.history = state.baseMessages.length > 0 ? [...state.baseMessages] : conversation.messages;
+            }
+          } else {
+            // 没有分支：使用旧格式，初始化分支结构
+            state.baseMessages = [];
+            state.branches = [];
+            state.currentBranchId = null;
+            state.history = conversation.messages || [];
+          }
+          
           state.currentConversationId = targetConversationId;
           // 重新渲染历史消息
           renderHistory();
@@ -3842,7 +4203,10 @@ async function saveHistory() {
     const conversation = {
       id: state.currentConversationId,
       timestamp: conversationIndex >= 0 ? data.conversations[conversationIndex].timestamp : Date.now(),
-      messages: state.history,
+      messages: state.history, // 当前显示的消息（从baseMessages + 当前分支消息）
+      baseMessages: state.baseMessages || [], // 分支点之前的消息（所有分支共享）
+      branches: state.branches || [], // 分支列表
+      currentBranchId: state.currentBranchId || null, // 当前显示的分支ID
       moduleId: currentModuleId, // 保存模块ID到对话
       docId: state.currentDocId || null, // 保存文档ID到对话
       title: conversationTitle || null // 保存对话标题
@@ -3916,9 +4280,20 @@ function renderHistory() {
       // 用户消息
       const div = document.createElement('div');
       div.className = 'flex justify-end fade-in mb-4';
+      
+      // 检查是否是分支点（在baseMessages的末尾，或者有分支且索引等于baseMessages长度）
+      const isBranchPoint = state.branches && state.branches.length > 0 && 
+                           index === state.baseMessages.length;
+      
+      // 生成分支切换器HTML（如果是分支点）
+      const branchSwitcherHtml = isBranchPoint ? renderBranchSwitcher(index) : '';
+      
       div.innerHTML = `
-        <div class="msg-user px-5 py-3 text-[15px] leading-relaxed max-w-xl shadow-md">
-          ${escapeHtml(msg.content)}
+        <div class="flex flex-col items-end gap-2">
+          ${branchSwitcherHtml}
+          <div class="msg-user px-5 py-3 text-[15px] leading-relaxed max-w-xl shadow-md">
+            ${escapeHtml(msg.content)}
+          </div>
         </div>
       `;
       fragment.appendChild(div);
@@ -3996,6 +4371,9 @@ export async function createNewConversation() {
   
   // 清空当前历史
   state.history = [];
+  state.baseMessages = [];
+  state.branches = [];
+  state.currentBranchId = null;
   state.currentConversationId = newConversationId;
   
   // 更新存储中的当前对话ID
@@ -4068,6 +4446,9 @@ export async function clearConversation() {
   // 创建新对话（清空当前对话）
   const newConversationId = Date.now().toString();
   state.history = [];
+  state.baseMessages = [];
+  state.branches = [];
+  state.currentBranchId = null;
   state.currentConversationId = newConversationId;
   
   // 更新存储中的当前对话ID
