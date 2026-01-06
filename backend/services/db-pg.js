@@ -119,10 +119,25 @@ class Database {
     return sql.replace(/\?/g, () => `$${paramIndex++}`);
   }
 
+  // 修复PostgreSQL布尔值查询：将 = 1 和 = 0 转换为 = true 和 = false
+  fixBooleanQueries(sql) {
+    // 修复 is_default = 1 和 is_default = 0
+    sql = sql.replace(/\bis_default\s*=\s*1\b/gi, 'is_default = true');
+    sql = sql.replace(/\bis_default\s*=\s*0\b/gi, 'is_default = false');
+    // 修复 is_active = 1 和 is_active = 0
+    sql = sql.replace(/\bis_active\s*=\s*1\b/gi, 'is_active = true');
+    sql = sql.replace(/\bis_active\s*=\s*0\b/gi, 'is_active = false');
+    // 修复 is_custom = 1 和 is_custom = 0（如果字段是布尔类型）
+    sql = sql.replace(/\bis_custom\s*=\s*1\b/gi, 'is_custom = true');
+    sql = sql.replace(/\bis_custom\s*=\s*0\b/gi, 'is_custom = false');
+    return sql;
+  }
+
   // 通用查询方法 - 返回单行
   async get(sql, params = []) {
     try {
-      const convertedSql = this.convertPlaceholders(sql);
+      let convertedSql = this.convertPlaceholders(sql);
+      convertedSql = this.fixBooleanQueries(convertedSql);
       const result = await this._pool.query(convertedSql, params);
       return result.rows[0] || null;
     } catch (error) {
@@ -134,7 +149,8 @@ class Database {
   // 通用查询方法 - 返回多行
   async all(sql, params = []) {
     try {
-      const convertedSql = this.convertPlaceholders(sql);
+      let convertedSql = this.convertPlaceholders(sql);
+      convertedSql = this.fixBooleanQueries(convertedSql);
       const result = await this._pool.query(convertedSql, params);
       return result.rows || [];
     } catch (error) {
@@ -146,8 +162,24 @@ class Database {
   // 执行SQL语句（INSERT, UPDATE, DELETE）
   async run(sql, params = []) {
     try {
-      const convertedSql = this.convertPlaceholders(sql);
-      const result = await this._pool.query(convertedSql, params);
+      let convertedSql = this.convertPlaceholders(sql);
+      convertedSql = this.fixBooleanQueries(convertedSql);
+      
+      // 处理布尔值参数：将整数 0/1 转换为布尔值 true/false
+      const convertedParams = params.map(param => {
+        // 如果参数是数字 0 或 1，且 SQL 中包含布尔字段，则转换为布尔值
+        // 这里简化处理：对于 is_default, is_active, is_custom 字段的值进行转换
+        if (typeof param === 'number' && (param === 0 || param === 1)) {
+          // 检查 SQL 中是否包含这些布尔字段名
+          const sqlLower = sql.toLowerCase();
+          if (sqlLower.includes('is_default') || sqlLower.includes('is_active')) {
+            return param === 1;
+          }
+        }
+        return param;
+      });
+      
+      const result = await this._pool.query(convertedSql, convertedParams);
       
       // 返回与SQLite兼容的格式
       return {

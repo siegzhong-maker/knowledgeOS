@@ -6,10 +6,12 @@ const { v4: uuidv4 } = require('uuid');
 // 获取激活的Context
 router.get('/active', async (req, res) => {
   try {
-    let context = await db.get('SELECT * FROM user_contexts WHERE is_active = 1 LIMIT 1');
+    // db-pg.js 会自动处理布尔值转换
+    let context = await db.get('SELECT * FROM user_contexts WHERE is_active = true LIMIT 1');
     
     // 如果没有激活的Context，创建默认的
     if (!context) {
+      const isPostgreSQL = !!process.env.DATABASE_URL || process.env.DB_TYPE === 'postgres';
       const defaultContext = {
         id: uuidv4(),
         name: '默认场景',
@@ -18,7 +20,7 @@ router.get('/active', async (req, res) => {
           teamSize: 3,
           industry: ''
         }),
-        is_active: 1,
+        is_active: isPostgreSQL ? true : 1,
         created_at: Date.now()
       };
       
@@ -56,7 +58,8 @@ router.put('/active', async (req, res) => {
     }
     
     // 获取当前激活的Context
-    let context = await db.get('SELECT * FROM user_contexts WHERE is_active = 1 LIMIT 1');
+    // db-pg.js 会自动处理布尔值转换
+    let context = await db.get('SELECT * FROM user_contexts WHERE is_active = true LIMIT 1');
     
     if (context) {
       // 更新现有Context
@@ -67,9 +70,10 @@ router.put('/active', async (req, res) => {
     } else {
       // 创建新Context
       const id = uuidv4();
+      const isPostgreSQL = !!process.env.DATABASE_URL || process.env.DB_TYPE === 'postgres';
       await db.run(
         'INSERT INTO user_contexts (id, name, context_data, is_active, created_at) VALUES (?, ?, ?, ?, ?)',
-        [id, '默认场景', JSON.stringify(context_data), 1, Date.now()]
+        [id, '默认场景', JSON.stringify(context_data), isPostgreSQL ? true : 1, Date.now()]
       );
       context = { id };
     }

@@ -98,6 +98,10 @@ router.post('/', async (req, res) => {
     const id = `kb-${uuidv4().split('-')[0]}`;
     const now = Date.now();
     
+    // 检查是否使用 PostgreSQL（布尔值需要使用 true/false）
+    const isPostgreSQL = !!process.env.DATABASE_URL || process.env.DB_TYPE === 'postgres';
+    const defaultValue = isPostgreSQL ? false : 0;
+    
     await db.run(
       `INSERT INTO knowledge_bases 
        (id, name, description, icon, color, is_default, created_at, updated_at)
@@ -108,7 +112,7 @@ router.post('/', async (req, res) => {
         description || '',
         icon || 'book',
         color || '#6366f1',
-        0, // 新建的知识库不是默认的
+        defaultValue, // 新建的知识库不是默认的
         now,
         now
       ]
@@ -153,8 +157,9 @@ router.put('/:id', async (req, res) => {
     
     // 如果设置为默认，先取消其他默认知识库
     if (is_default === 1 || is_default === true) {
+      // db-pg.js 会自动处理布尔值转换
       await db.run(
-        'UPDATE knowledge_bases SET is_default = 0 WHERE is_default = 1'
+        'UPDATE knowledge_bases SET is_default = false WHERE is_default = true'
       );
     }
     
@@ -179,7 +184,9 @@ router.put('/:id', async (req, res) => {
     }
     if (is_default !== undefined) {
       updates.push('is_default = ?');
-      params.push(is_default ? 1 : 0);
+      // db-pg.js 会自动处理布尔值转换
+      const isPostgreSQL = !!process.env.DATABASE_URL || process.env.DB_TYPE === 'postgres';
+      params.push(isPostgreSQL ? (is_default ? true : false) : (is_default ? 1 : 0));
     }
     
     updates.push('updated_at = ?');
@@ -229,7 +236,9 @@ router.delete('/:id', async (req, res) => {
       });
     }
     
-    if (kb.is_default === 1) {
+    // PostgreSQL 返回布尔值，SQLite 返回整数
+    const isDefault = kb.is_default === true || kb.is_default === 1;
+    if (isDefault) {
       return res.status(400).json({
         success: false,
         message: '不能删除默认知识库'
