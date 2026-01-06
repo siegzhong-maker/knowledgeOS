@@ -380,11 +380,72 @@ async function ensureDatabaseInitialized() {
       `);
       console.log('✓ modules表已创建');
 
+      // personal_knowledge_items 表（知识点表，非常重要！）
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS personal_knowledge_items (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          summary TEXT,
+          key_conclusions TEXT DEFAULT '[]',
+          source_item_id TEXT,
+          source_page INTEGER,
+          source_excerpt TEXT,
+          confidence_score REAL DEFAULT 0,
+          status TEXT DEFAULT 'confirmed' CHECK(status IN ('confirmed', 'pending', 'archived')),
+          category TEXT,
+          subcategory_id TEXT,
+          tags TEXT DEFAULT '[]',
+          knowledge_base_id TEXT,
+          created_at BIGINT NOT NULL,
+          updated_at BIGINT NOT NULL,
+          metadata TEXT
+        )
+      `);
+      console.log('✓ personal_knowledge_items表已创建');
+
+      // knowledge_relations 表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_relations (
+          id TEXT PRIMARY KEY,
+          source_knowledge_id TEXT NOT NULL,
+          target_knowledge_id TEXT NOT NULL,
+          relation_type TEXT DEFAULT 'related' CHECK(relation_type IN ('related', 'similar', 'derived')),
+          similarity_score REAL DEFAULT 0,
+          created_at BIGINT NOT NULL
+        )
+      `);
+      console.log('✓ knowledge_relations表已创建');
+
+      // category_subcategories 表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS category_subcategories (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL CHECK(category IN ('work', 'learning', 'leisure', 'life')),
+          name TEXT NOT NULL,
+          keywords TEXT DEFAULT '[]',
+          order_index INTEGER DEFAULT 0,
+          is_custom INTEGER DEFAULT 0,
+          created_at BIGINT NOT NULL,
+          updated_at BIGINT NOT NULL,
+          UNIQUE(category, name)
+        )
+      `);
+      console.log('✓ category_subcategories表已创建');
+
       // 创建索引
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_type ON source_items(type)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_status ON source_items(status)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_created_at ON source_items(created_at DESC)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_knowledge_base_id ON source_items(knowledge_base_id)`);
+      
+      // personal_knowledge_items 表索引
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_knowledge_base_id ON personal_knowledge_items(knowledge_base_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_source_item_id ON personal_knowledge_items(source_item_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_status ON personal_knowledge_items(status)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_created_at ON personal_knowledge_items(created_at DESC)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_subcategory ON personal_knowledge_items(subcategory_id)`);
+      
       console.log('✓ 索引已创建');
 
       console.log('✓ PostgreSQL数据库初始化完成');

@@ -44,11 +44,25 @@ export async function loadKnowledgeItems(filters = {}) {
     knowledgeState.loading = true;
     renderKnowledgeView(); // 显示加载状态
 
+    // 获取当前知识库ID
+    let currentKnowledgeBaseId = null;
+    try {
+      const { getCurrentKnowledgeBaseId } = await import('./knowledge-bases.js');
+      currentKnowledgeBaseId = getCurrentKnowledgeBaseId();
+    } catch (e) {
+      console.warn('无法获取当前知识库ID:', e);
+    }
+
     const params = {
       page: knowledgeState.currentPage,
       limit: 50,
       ...filters
     };
+
+    // 如果指定了知识库ID，使用指定的；否则使用当前知识库ID
+    if (!params.knowledgeBaseId && currentKnowledgeBaseId) {
+      params.knowledgeBaseId = currentKnowledgeBaseId;
+    }
 
     if (knowledgeState.currentFilter !== 'all') {
       params.status = knowledgeState.currentFilter;
@@ -58,6 +72,8 @@ export async function loadKnowledgeItems(filters = {}) {
       params.search = knowledgeState.searchQuery;
     }
 
+    console.log('[知识库] 加载知识列表，参数:', params);
+
     const response = await knowledgeAPI.getItems(params);
     
     if (!response.success) {
@@ -66,15 +82,30 @@ export async function loadKnowledgeItems(filters = {}) {
 
     const { data, total, hasMore } = response;
     
+    console.log('[知识库] 获取到知识列表:', {
+      count: data?.length || 0,
+      total,
+      hasMore,
+      currentKnowledgeBaseId,
+      filters: params
+    });
+    
     // 调试：检查子分类数据
     if (data && data.length > 0) {
-      console.log('知识列表数据示例:', {
+      console.log('[知识库] 知识列表数据示例:', {
         firstItem: {
           id: data[0].id,
           category: data[0].category,
           subcategory_id: data[0].subcategory_id,
-          subcategory: data[0].subcategory
+          subcategory: data[0].subcategory,
+          knowledge_base_id: data[0].knowledge_base_id
         }
+      });
+    } else {
+      console.warn('[知识库] 未获取到知识点数据，可能原因：', {
+        currentKnowledgeBaseId,
+        filters: params,
+        suggestion: '请检查：1) 是否已提取知识 2) 知识是否保存到了当前知识库'
       });
     }
     
@@ -632,6 +663,13 @@ export async function initKnowledgeView() {
   
   // 渲染分类筛选（数据加载完成后）
   renderCategoryFilters();
+
+  // 监听知识库切换事件，重新加载知识列表
+  document.addEventListener('knowledgeBaseChanged', async (event) => {
+    console.log('[知识库] 知识库已切换，重新加载知识列表');
+    knowledgeState.currentPage = 1;
+    await loadKnowledgeItems();
+  });
 }
 
 /**
