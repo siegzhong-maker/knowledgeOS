@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * 通过 API 迁移数据
@@ -257,6 +258,19 @@ router.post('/create-tables', async (req, res) => {
         )
       `);
       results.tables.push('personal_knowledge_items');
+      
+      // 确保 subcategory_id 字段存在
+      try {
+        await client.query(`
+          ALTER TABLE personal_knowledge_items 
+          ADD COLUMN IF NOT EXISTS subcategory_id TEXT
+        `);
+      } catch (err) {
+        // 忽略字段已存在的错误
+        if (!err.message.includes('duplicate') && !err.message.includes('already exists')) {
+          console.warn('添加 subcategory_id 字段时出现警告:', err.message);
+        }
+      }
     } catch (err) {
       console.error('创建 personal_knowledge_items 失败:', err.message);
     }
@@ -320,7 +334,53 @@ router.post('/create-tables', async (req, res) => {
       }
     }
 
-    // 5. 验证表是否创建成功
+    // 5. 插入预设子分类数据
+    const presetSubcategories = [
+      // 工作 (work)
+      { category: 'work', name: '项目管理', keywords: JSON.stringify(['项目', '计划', '执行', '进度', '里程碑', '任务', '团队协作']), order_index: 0 },
+      { category: 'work', name: '业务分析', keywords: JSON.stringify(['数据', '分析', '报告', '指标', '趋势', '洞察', '决策']), order_index: 1 },
+      { category: 'work', name: '团队管理', keywords: JSON.stringify(['团队', '领导', '沟通', '协调', '激励', '绩效', '发展']), order_index: 2 },
+      { category: 'work', name: '产品运营', keywords: JSON.stringify(['产品', '用户', '市场', '运营', '推广', '增长', '优化']), order_index: 3 },
+      // 学习 (learning)
+      { category: 'learning', name: '技能提升', keywords: JSON.stringify(['技能', '能力', '方法', '技巧', '实践', '练习', '掌握']), order_index: 0 },
+      { category: 'learning', name: '知识体系', keywords: JSON.stringify(['知识', '理论', '概念', '原理', '框架', '体系', '结构']), order_index: 1 },
+      { category: 'learning', name: '阅读笔记', keywords: JSON.stringify(['阅读', '笔记', '总结', '思考', '启发', '感悟', '应用']), order_index: 2 },
+      { category: 'learning', name: '学术研究', keywords: JSON.stringify(['研究', '学术', '论文', '实验', '数据', '分析', '结论']), order_index: 3 },
+      // 娱乐 (leisure)
+      { category: 'leisure', name: '影视音乐', keywords: JSON.stringify(['电影', '音乐', '剧集', '综艺', '娱乐', '欣赏', '推荐']), order_index: 0 },
+      { category: 'leisure', name: '旅行探索', keywords: JSON.stringify(['旅行', '旅游', '景点', '攻略', '体验', '探索', '发现']), order_index: 1 },
+      { category: 'leisure', name: '运动健身', keywords: JSON.stringify(['运动', '健身', '锻炼', '健康', '训练', '计划', '目标']), order_index: 2 },
+      { category: 'leisure', name: '兴趣爱好', keywords: JSON.stringify(['兴趣', '爱好', '收藏', '创作', '分享', '交流', '社区']), order_index: 3 },
+      // 生活 (life)
+      { category: 'life', name: '健康养生', keywords: JSON.stringify(['健康', '养生', '医疗', '饮食', '作息', '运动', '调理']), order_index: 0 },
+      { category: 'life', name: '理财投资', keywords: JSON.stringify(['理财', '投资', '资产', '规划', '风险', '收益', '策略']), order_index: 1 },
+      { category: 'life', name: '家庭情感', keywords: JSON.stringify(['家庭', '情感', '亲情', '爱情', '友情', '相处', '沟通']), order_index: 2 },
+      { category: 'life', name: '生活技巧', keywords: JSON.stringify(['生活', '技巧', '方法', '经验', '整理', '收纳', '优化']), order_index: 3 }
+    ];
+
+    const now = Date.now();
+    let insertedCount = 0;
+    for (const subcat of presetSubcategories) {
+      try {
+        const id = `subcat-${uuidv4()}`;
+        const result = await client.query(`
+          INSERT INTO category_subcategories (id, category, name, keywords, order_index, is_custom, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
+          ON CONFLICT (category, name) DO NOTHING
+        `, [id, subcat.category, subcat.name, subcat.keywords, subcat.order_index, now, now]);
+        
+        if (result.rowCount > 0) {
+          insertedCount++;
+        }
+      } catch (err) {
+        // 忽略重复插入错误
+        if (!err.message.includes('duplicate') && !err.message.includes('UNIQUE')) {
+          console.warn(`插入子分类 ${subcat.name} 时出现警告:`, err.message);
+        }
+      }
+    }
+
+    // 6. 验证表是否创建成功
     const tables = await client.query(`
       SELECT table_name 
       FROM information_schema.tables 
@@ -329,12 +389,21 @@ router.post('/create-tables', async (req, res) => {
       ORDER BY table_name
     `);
 
+    // 验证子分类数据
+    const subcategoryCount = await client.query(`
+      SELECT COUNT(*) as count FROM category_subcategories
+    `);
+
     res.json({
       success: true,
       message: '数据库表创建完成',
       createdTables: results.tables,
       createdIndexes: results.indexes.length,
-      verifiedTables: tables.rows.map(r => r.table_name)
+      verifiedTables: tables.rows.map(r => r.table_name),
+      subcategories: {
+        inserted: insertedCount,
+        total: parseInt(subcategoryCount.rows[0].count)
+      }
     });
 
   } catch (error) {
