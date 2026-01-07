@@ -91,6 +91,40 @@ app.post('/api/diagnose/fix-pdf-paths', async (req, res) => {
   }
 });
 
+// 删除缺失的PDF记录端点（用于Railway部署）
+app.post('/api/diagnose/delete-missing-pdfs', async (req, res) => {
+  try {
+    const { deleteMissingPDFs } = require('./scripts/delete-missing-pdfs');
+    const execute = req.body.execute === true; // 需要明确传递 execute: true
+    
+    if (!execute) {
+      // 预览模式
+      const result = await deleteMissingPDFs(true);
+      return res.json({
+        success: true,
+        data: result,
+        message: `预览模式：找到 ${result.skipped} 个缺失的文件，未实际删除`,
+        preview: true
+      });
+    }
+    
+    // 实际删除
+    const result = await deleteMissingPDFs(false);
+    res.json({
+      success: true,
+      data: result,
+      message: `删除完成：已删除 ${result.deleted} 个缺失的记录`
+    });
+  } catch (error) {
+    console.error('删除缺失PDF记录失败:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || '删除失败',
+      error: error.stack
+    });
+  }
+});
+
 // 文件系统诊断端点
 app.get('/api/diagnose/files', async (req, res) => {
   try {

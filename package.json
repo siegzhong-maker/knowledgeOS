@@ -16,6 +16,7 @@
     "diagnose": "node backend/scripts/diagnose.js",
     "check-pdfs": "node backend/scripts/check-missing-pdfs.js",
     "fix-pdf-paths": "node backend/scripts/fix-pdf-paths.js",
+    "delete-missing-pdfs": "node backend/scripts/delete-missing-pdfs.js",
     "postinstall": "npm run init-db || true"
   },
   "keywords": [

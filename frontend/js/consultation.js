@@ -134,8 +134,18 @@ export async function loadPDFList() {
     console.log('PDF列表API响应:', response);
     
     if (response.success) {
-      state.pdfList = response.data || [];
-      console.log(`加载到 ${state.pdfList.length} 个PDF文档:`, state.pdfList.map(d => d.title));
+      const newList = response.data || [];
+      // 去重：基于文档ID，保留第一个出现的
+      const uniqueList = [];
+      const seenIds = new Set();
+      for (const doc of newList) {
+        if (!seenIds.has(doc.id)) {
+          seenIds.add(doc.id);
+          uniqueList.push(doc);
+        }
+      }
+      state.pdfList = uniqueList;
+      console.log(`加载到 ${state.pdfList.length} 个PDF文档（去重后）:`, state.pdfList.map(d => d.title));
       
       // 渲染PDF列表（先显示，不等待分析）
       renderPDFList();
@@ -374,11 +384,80 @@ function setupUploadButton() {
         const { uploadPDF } = await import('./pdf.js');
         const result = await uploadPDF(file, null);
         
-        // 重新加载PDF列表
-        await loadPDFList();
-        
         // 显示成功消息
         console.log('PDF上传成功:', result);
+        
+        // 立即获取新上传文档的完整信息并添加到列表（优化用户体验）
+        let immediateAddSuccess = false;
+        if (result && result.id) {
+          try {
+            const docResponse = await itemsAPI.get(result.id);
+            if (docResponse.success && docResponse.data) {
+              const newDoc = docResponse.data;
+              // 检查是否已存在（避免重复）
+              const exists = state.pdfList.find(d => d.id === newDoc.id);
+              if (!exists) {
+                // 立即添加到列表顶部
+                state.pdfList.unshift(newDoc);
+                // 立即渲染，用户无需等待
+                await renderPDFList();
+                immediateAddSuccess = true;
+                console.log('新文档已立即添加到列表');
+              }
+            }
+          } catch (err) {
+            console.warn('获取新文档详情失败，将使用轮询刷新:', err);
+          }
+        }
+        
+        // 智能轮询刷新机制：确保数据同步
+        if (result && result.id) {
+          let pollCount = 0;
+          const maxPolls = 5; // 最多轮询5次
+          const pollInterval = 500; // 每500ms检查一次
+          const initialDelay = immediateAddSuccess ? 1000 : 500; // 如果立即添加成功，延迟更久再开始轮询
+          
+          const pollForDocument = async () => {
+            pollCount++;
+            
+            try {
+              // 执行完整刷新以确保数据同步
+              await loadPDFList();
+              
+              // 检查文档是否已在列表中
+              const docExists = state.pdfList.find(d => d.id === result.id);
+              
+              if (docExists) {
+                // 文档已存在，停止轮询
+                console.log(`文档已同步，轮询结束（第${pollCount}次）`);
+                return;
+              }
+              
+              // 如果还没找到且未达到最大次数，继续轮询
+              if (pollCount < maxPolls) {
+                setTimeout(pollForDocument, pollInterval);
+              } else {
+                // 达到最大次数，停止轮询（已经执行了完整刷新）
+                console.log('轮询完成，已执行完整刷新');
+              }
+            } catch (error) {
+              console.error('轮询检查失败:', error);
+              // 如果轮询出错，继续尝试或停止
+              if (pollCount < maxPolls) {
+                setTimeout(pollForDocument, pollInterval);
+              }
+            }
+          };
+          
+          // 延迟后开始第一次轮询
+          setTimeout(pollForDocument, initialDelay);
+        } else {
+          // 如果没有文档ID，使用延迟刷新作为后备
+          setTimeout(async () => {
+            await loadPDFList();
+          }, 500);
+        }
+        
         alert('PDF上传成功！');
         
         newUploadBtn.disabled = false;
@@ -657,12 +736,26 @@ export async function renderPDFList() {
   
   console.log('渲染PDF列表，文档数量:', state.pdfList.length);
   
+  // 去重：基于文档ID，作为最后防线确保不会显示重复文档
+  const uniqueDocs = [];
+  const seenIds = new Set();
+  for (const doc of state.pdfList) {
+    if (!seenIds.has(doc.id)) {
+      seenIds.add(doc.id);
+      uniqueDocs.push(doc);
+    }
+  }
+  
+  if (uniqueDocs.length !== state.pdfList.length) {
+    console.warn(`检测到重复文档，原始数量: ${state.pdfList.length}，去重后: ${uniqueDocs.length}`);
+  }
+  
   // 批量获取所有文档的对话数量（修复 N+1 查询）
-  const docIds = state.pdfList.map(doc => doc.id);
+  const docIds = uniqueDocs.map(doc => doc.id);
   const { counts, conversationsByDoc } = await getConversationsCountForAllDocs(docIds);
   
-  // 为每个文档添加对话信息
-  const docsWithConversations = state.pdfList.map(doc => ({
+  // 为每个文档添加对话信息（使用去重后的列表）
+  const docsWithConversations = uniqueDocs.map(doc => ({
     ...doc,
     conversationCount: counts[doc.id] || 0,
     conversations: conversationsByDoc[doc.id] || []
