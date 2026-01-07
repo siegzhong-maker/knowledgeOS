@@ -108,7 +108,8 @@ const state = {
   // 分支相关
   baseMessages: [], // 分支点之前的消息（所有分支共享）
   branches: [], // 分支列表 [{ branchId, version, branchPoint, messages, docIds, knowledgeBaseIds, createdAt }]
-  currentBranchId: null // 当前显示的分支ID
+  currentBranchId: null, // 当前显示的分支ID
+  currentStep: null // 当前对话已显示的步骤（用于去重步骤标签）
 };
 
 // 标记智能问答是否已完成首次初始化（用于控制视图级 Loading）
@@ -2005,8 +2006,8 @@ export function addAiMessage(html, isStreaming = false, citations = []) {
   const contentHtml = isStreaming 
     ? (html === '正在思考...' 
         ? '<div class="flex items-center gap-2 text-slate-400"><div class="w-4 h-4 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin"></div><span>正在思考...</span></div>' 
-        : parseMarkdown(html) + '<span class="cursor-blink">▋</span>')
-    : parseMarkdown(html);
+        : parseMarkdown(html, true) + '<span class="cursor-blink">▋</span>')
+    : parseMarkdown(html, true);
   
   div.innerHTML = `
     <div class="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 shadow-sm mt-1">
@@ -2026,6 +2027,11 @@ export function addAiMessage(html, isStreaming = false, citations = []) {
   `;
   
   container.appendChild(div);
+  
+  // 将 citations 数据保存到 DOM 元素上，供点击时使用
+  if (citations && Array.isArray(citations)) {
+    div.__citations = citations;
+  }
   
   // 初始化Lucide图标
   if (window.lucide) {
@@ -2668,6 +2674,9 @@ function updateAiMessage(element, content, citations = [], evaluation = null) {
   // 更新引用区域
   const citationsArea = element.querySelector('.citations-area');
   if (citations && citations.length > 0) {
+    // 将 citations 数据保存到 DOM 元素上，供点击时使用
+    element.__citations = citations;
+    
     const citationsHtml = renderCitations(citations, messageId);
     if (citationsArea) {
       citationsArea.outerHTML = citationsHtml;
@@ -2683,14 +2692,17 @@ function updateAiMessage(element, content, citations = [], evaluation = null) {
         }
       }
     }
+  } else {
+    // 如果没有引用，清除保存的数据
+    element.__citations = [];
   }
   
   const contentEl = element.querySelector('.msg-ai');
   if (contentEl) {
     // 如果有内容，移除"正在思考"状态
     if (content && content.trim()) {
-      // 先解析markdown，再高亮引用
-      let html = parseMarkdown(content);
+      // 先解析markdown（应用步骤标签去重），再高亮引用
+      let html = parseMarkdown(content, true);
       
       // 高亮答案中的引用文本
       if (citations && citations.length > 0) {
@@ -2730,6 +2742,22 @@ function updateAiMessage(element, content, citations = [], evaluation = null) {
     
     // 重新绑定引用点击
     bindCitationClicks(element);
+    
+    // 重新绑定引用卡片按钮点击事件（因为引用区域可能被重新渲染）
+    element.querySelectorAll('.view-citation-btn').forEach(btn => {
+      // 移除旧的事件监听器（通过克隆节点）
+      const newBtn = btn.cloneNode(true);
+      btn.parentNode.replaceChild(newBtn, btn);
+      
+      newBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = parseInt(newBtn.getAttribute('data-citation-index'));
+        const page = parseInt(newBtn.getAttribute('data-page'));
+        const text = newBtn.getAttribute('data-text') || '';
+        const docId = newBtn.getAttribute('data-doc-id') || '';
+        handleCitationClick(index, page, text, docId);
+      });
+    });
     
     // 绑定答案中的引用链接点击事件
     element.querySelectorAll('.citation-link').forEach(link => {
@@ -2804,6 +2832,8 @@ async function resolvePdfDocId(docId, citation) {
 
 // 处理引用卡片点击（优先走与文档库一致的PDF预览）
 export async function handleCitationClick(citationIndex, page, text, docId) {
+  console.log('[引用点击] 参数:', { citationIndex, page, text: text?.substring(0, 50), docId });
+  
   // 标记为已查看
   const citationCard = document.querySelector(`[data-citation-id="${citationIndex}"]`);
   if (citationCard) {
@@ -2811,11 +2841,60 @@ export async function handleCitationClick(citationIndex, page, text, docId) {
   }
   
   // 优先使用传入的docId，其次使用当前文档ID
-  const originalDocId = docId || state.currentDocId || null;
+  // 注意：docId 可能是空字符串 ''，需要转换为 null
+  let originalDocId = (docId && docId.trim() !== '') ? docId : (state.currentDocId || null);
   
-  // 如果完全没有可用的文档ID，只做定位/高亮（维持原有降级体验）
+  console.log('[引用点击] 初始 docId:', originalDocId);
+  
+  // 如果docId为空，尝试通过引用卡片中的文档标题查找
+  if (!originalDocId && citationCard) {
+    const docNameEl = citationCard.querySelector('.doc-name');
+    if (docNameEl) {
+      const docTitle = docNameEl.textContent.trim();
+      console.log('[引用点击] 尝试通过标题查找:', docTitle);
+      // 在PDF列表中查找匹配的文档
+      const matchedDoc = state.pdfList?.find(d => d.title === docTitle && d.type === 'pdf');
+      if (matchedDoc) {
+        originalDocId = matchedDoc.id;
+        console.log('[引用点击] 通过标题找到文档:', originalDocId);
+      }
+    }
+  }
+  
+  // 如果还是没有找到，尝试从消息的 citations 数据中获取
+  if (!originalDocId && citationCard) {
+    const citationsArea = citationCard.closest('.citations-area');
+    if (citationsArea) {
+      const messageId = citationsArea.getAttribute('data-message-id');
+      if (messageId) {
+        const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageEl && messageEl.__citations && Array.isArray(messageEl.__citations)) {
+          const citationData = messageEl.__citations[citationIndex];
+          if (citationData && citationData.docId) {
+            originalDocId = citationData.docId;
+            console.log('[引用点击] 从消息数据中获取 docId:', originalDocId);
+          }
+        }
+      }
+    }
+  }
+  
+  // 如果完全没有可用的文档ID，尝试通过文本在已打开的文档中定位
   if (!originalDocId) {
-    if (page) {
+    console.log('[引用点击] 没有找到文档ID，尝试在已打开的文档中定位');
+    // 确保右侧面板打开
+    const panel = document.getElementById('right-panel');
+    if (panel) {
+      const isOpen = panel.style.width === '40%' || panel.style.width === '45%' || panel.classList.contains('w-[45%]') || panel.offsetWidth > 100;
+      if (!isOpen) {
+        panel.style.width = '40%';
+        panel.style.minWidth = '40%';
+        panel.classList.add('w-[40%]');
+        localStorage.removeItem('rightPanelClosed');
+      }
+    }
+    
+    if (page && state.currentDocId) {
       locateQuote(page, text);
     } else if (text) {
       const container = document.getElementById('pdf-content');
@@ -2883,6 +2962,7 @@ export async function handleCitationClick(citationIndex, page, text, docId) {
     }, 300);
   } catch (error) {
     console.error('加载引用文档失败:', error);
+    showToast('无法打开文档，请检查文档是否存在', 'error');
   }
 }
 
@@ -3267,14 +3347,36 @@ export async function regenerateMessage(messageId) {
       }
     }
     
-    // 3. 更新state.history为baseMessages（新分支还没有消息）
+    // 3. 更新state.history为baseMessages + 用户消息（保留用户消息，只移除AI回答）
     state.history = [...state.baseMessages];
     
-    // 4. 从DOM中移除用户消息和AI消息（从分支点开始的消息）
-    const messagesToRemove = [];
-    if (userMessageIndex >= 0) {
-      messagesToRemove.push(userMessageEl);
+    // 获取用户消息对象（从原始 history 中）
+    let userMessageObj = null;
+    if (foundUserIndex >= 0 && foundUserIndex < state.history.length + state.branches.length) {
+      // 从原始历史记录中获取用户消息（需要从完整的 history 中获取）
+      const originalHistory = [...state.baseMessages];
+      if (state.branches && state.branches.length > 0 && state.currentBranchId) {
+        const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+        if (currentBranch && currentBranch.messages) {
+          originalHistory.push(...currentBranch.messages);
+        }
+      }
+      if (foundUserIndex < originalHistory.length) {
+        userMessageObj = originalHistory[foundUserIndex];
+      }
     }
+    
+    // 如果找不到，创建一个新的用户消息对象
+    if (!userMessageObj) {
+      userMessageObj = { role: 'user', content: userMessageContent };
+    }
+    
+    // 将用户消息添加到 history（这样重新渲染时会显示）
+    state.history.push(userMessageObj);
+    
+    // 4. 从DOM中只移除AI消息，保留用户消息
+    const messagesToRemove = [];
+    // 只移除AI消息，不移除用户消息
     if (messageIndex >= 0) {
       messagesToRemove.push(messageEl);
     }
@@ -3285,11 +3387,129 @@ export async function regenerateMessage(messageId) {
       }
     });
     
-    // 5. 重新渲染历史消息（显示baseMessages）
+    // 5. 重新渲染历史消息（显示baseMessages + 用户消息）
     renderHistory();
     
-    // 6. 重新发送用户消息（这将创建新分支的消息）
-    await handleConversation(userMessageContent);
+    // 6. 重新生成AI回答
+    // 注意：用户消息已经在 history 中了，所以需要从 history 中移除最后一个用户消息
+    // 然后调用 handleConversation，它会重新添加用户消息并生成回答
+    // 但这样会导致重复，所以我们需要直接调用API，而不是通过 handleConversation
+    
+    // 方案：直接调用API生成回答，而不是通过 handleConversation
+    // 这样可以避免重复添加用户消息
+    const messages = state.history.map(h => ({ role: h.role, content: h.content }));
+    
+    // 获取有效的Context
+    const context = getValidContext();
+    
+    // 创建AI消息占位符
+    const responseEl = addAiMessage('正在思考...', true, []);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // 获取评估开关状态
+    const sessionEvaluationEnabled = localStorage.getItem('knowledge_relevance_evaluation_enabled');
+    const enableEvaluation = sessionEvaluationEnabled !== null 
+      ? sessionEvaluationEnabled === 'true' 
+      : null;
+    
+    let fullResponse = '';
+    let allCitations = [];
+    let evaluationResult = null;
+    
+    await consultationAPI.chat(
+      messages,
+      state.currentDocId,
+      context,
+      state.currentDocInfo,
+      (chunk) => {
+        if (chunk && typeof chunk === 'object') {
+          if (chunk.evaluation) {
+            evaluationResult = chunk.evaluation;
+            if (responseEl) {
+              updateAiMessage(responseEl, fullResponse, allCitations, evaluationResult);
+            }
+            return;
+          }
+          
+          if (chunk.content) {
+            fullResponse += chunk.content;
+          }
+          
+          if (chunk.citations && Array.isArray(chunk.citations) && chunk.citations.length > 0) {
+            chunk.citations.forEach(citation => {
+              const citationWithDoc = {
+                ...citation,
+                docId: citation.docId || state.currentDocId || null,
+                docTitle: citation.docTitle || citation.docName || state.currentDoc?.title || '文档',
+                knowledgeBaseId: citation.knowledgeBaseId || state.currentDocInfo?.knowledgeBaseId || null,
+                knowledgeBaseName: citation.knowledgeBaseName || state.currentDocInfo?.knowledgeBaseName || null
+              };
+              
+              const exists = allCitations.find(c => 
+                c.page === citationWithDoc.page && 
+                c.text === citationWithDoc.text &&
+                c.fullMatch === citationWithDoc.fullMatch
+              );
+              if (!exists) {
+                allCitations.push(citationWithDoc);
+              }
+            });
+          }
+          
+          if (responseEl) {
+            updateAiMessage(responseEl, fullResponse, allCitations, evaluationResult);
+          }
+        }
+      },
+      enableEvaluation
+    );
+    
+    // 流式完成，移除光标，添加操作按钮
+    if (responseEl) {
+      const contentEl = responseEl.querySelector('.msg-ai');
+      if (contentEl) {
+        contentEl.innerHTML = contentEl.innerHTML.replace('<span class="cursor-blink">▋</span>', '');
+        const msgContainer = responseEl.querySelector('.space-y-1');
+        if (msgContainer && !msgContainer.querySelector('.message-actions')) {
+          msgContainer.insertAdjacentHTML('beforeend', renderMessageActions(responseEl.getAttribute('data-message-id')));
+          if (window.lucide) lucide.createIcons(responseEl);
+          bindMessageActions(responseEl);
+        }
+      }
+    }
+    
+    // 保存AI回答到 history
+    const assistantMessage = { 
+      role: 'assistant', 
+      content: fullResponse, 
+      citations: allCitations,
+      evaluation: evaluationResult,
+      docId: state.currentDocId,
+      docInfo: state.currentDocInfo ? {
+        ...state.currentDocInfo,
+        docId: state.currentDocId,
+        knowledgeBaseId: state.currentDocInfo.knowledgeBaseId,
+        knowledgeBaseName: state.currentDocInfo.knowledgeBaseName
+      } : null
+    };
+    
+    state.history.push(assistantMessage);
+    
+    // 更新当前分支的消息
+    if (state.currentBranchId && state.branches && state.branches.length > 0) {
+      const currentBranch = state.branches.find(b => b.branchId === state.currentBranchId);
+      if (currentBranch) {
+        const branchStartIndex = state.baseMessages.length;
+        const branchMessages = state.history.slice(branchStartIndex);
+        currentBranch.messages = branchMessages;
+        currentBranch.docIds = extractDocIdsFromMessages(branchMessages);
+        currentBranch.knowledgeBaseIds = extractKnowledgeBaseIdsFromMessages(branchMessages);
+      }
+    }
+    
+    await saveHistory();
+    await renderConversationHistory();
+    updateChatStatusIndicator();
     
   } catch (error) {
     console.error('重新生成消息失败:', error);
@@ -4148,6 +4368,25 @@ export async function loadConversationFromHistory(indexOrId) {
     state.history = conversation.messages || [];
   }
   
+  // 从历史消息中提取最后一个步骤标签，用于后续去重
+  state.currentStep = null;
+  if (state.history && state.history.length > 0) {
+    // 从后往前查找最后一个AI回答中的步骤标签
+    for (let i = state.history.length - 1; i >= 0; i--) {
+      const msg = state.history[i];
+      if (msg.role === 'assistant' && msg.content) {
+        const stepLabelRegex = /📌\s*\*\*这个问题属于：([^（]+)（第(\d+)步）\*\*/;
+        const match = msg.content.match(stepLabelRegex);
+        if (match) {
+          const stepName = match[1].trim();
+          const stepNumber = parseInt(match[2], 10);
+          state.currentStep = `${stepName}（第${stepNumber}步）`;
+          break;
+        }
+      }
+    }
+  }
+  
   state.currentConversationId = conversation.id;
   
   // 更新存储中的当前对话ID
@@ -4443,9 +4682,46 @@ export async function deleteConversation(indexOrId) {
   }
 }
 
+// 移除重复的步骤标签（仅当与上一次回答的步骤相同时才移除）
+function removeDuplicateStepLabel(text, isNewMessage = false) {
+  if (!text) return text;
+  
+  // 只在处理新消息时应用去重逻辑，历史消息保持完整
+  if (!isNewMessage) {
+    return text;
+  }
+  
+  // 匹配步骤标签格式：📌 **这个问题属于：[步骤名称]（第X步）**
+  // 支持多种可能的格式变体
+  const stepLabelRegex = /📌\s*\*\*这个问题属于：([^（]+)（第(\d+)步）\*\*/;
+  const match = text.match(stepLabelRegex);
+  
+  if (match) {
+    const stepName = match[1].trim();
+    const stepNumber = parseInt(match[2], 10);
+    const stepKey = `${stepName}（第${stepNumber}步）`;
+    
+    // 只有当与上一次回答的步骤完全相同时，才移除标签
+    // 如果步骤不同或这是第一次回答（state.currentStep 为 null），应该显示标签
+    if (state.currentStep === stepKey) {
+      // 移除整个标签行（包括前后的换行）
+      text = text.replace(stepLabelRegex, '').replace(/^\s*\n\s*/, '').replace(/\s*\n\s*$/, '');
+    } else {
+      // 步骤不同或是第一次回答，显示标签并更新当前步骤
+      state.currentStep = stepKey;
+      // 不修改文本，保留标签
+    }
+  }
+  
+  return text;
+}
+
 // 解析Markdown
-function parseMarkdown(text) {
+function parseMarkdown(text, isNewMessage = false) {
   if (!text) return '';
+  
+  // 先移除重复的步骤标签（仅对新消息）
+  text = removeDuplicateStepLabel(text, isNewMessage);
   
   // 简单的Markdown解析
   return text
@@ -4896,7 +5172,7 @@ function renderHistory() {
       const messageId = `msg-${Date.now()}-${index}`;
       const citations = msg.citations || [];
       const citationsHtml = renderCitations(citations, messageId);
-      const contentHtml = parseMarkdown(msg.content);
+      const contentHtml = parseMarkdown(msg.content, false); // 历史消息不应用步骤标签去重
       
       const div = document.createElement('div');
       div.className = 'flex gap-4 fade-in mb-4 max-w-3xl group';
@@ -4969,6 +5245,7 @@ export async function createNewConversation(preserveDocState = false) {
   state.branches = [];
   state.currentBranchId = null;
   state.currentConversationId = newConversationId;
+  state.currentStep = null; // 重置步骤标签状态
   
   // 如果不保留文档状态，清空文档和知识库引用
   if (!preserveDocState) {

@@ -174,8 +174,12 @@ function validateCitations(answer, citations, pageContent) {
 /**
  * AI评估
  * 使用AI判断回答与知识库的关联度
+ * @param {string} answer - AI回答
+ * @param {string} knowledgeBase - 知识库内容
+ * @param {string} question - 用户问题
+ * @param {string} userApiKey - 用户API Key（可选）
  */
-async function aiEvaluate(answer, knowledgeBase, question) {
+async function aiEvaluate(answer, knowledgeBase, question, userApiKey = null) {
   if (!answer || !knowledgeBase) {
     return {
       relevanceScore: 0,
@@ -233,7 +237,8 @@ ${answerSample}
   try {
     const response = await callDeepSeekAPI(messages, {
       max_tokens: 500,
-      temperature: 0.3
+      temperature: 0.3,
+      userApiKey: userApiKey
     });
 
     // 尝试解析JSON响应
@@ -272,8 +277,14 @@ ${answerSample}
 /**
  * 综合评估
  * 整合所有评估结果，生成最终评分
+ * @param {string} answer - AI回答
+ * @param {string} knowledgeBase - 知识库内容
+ * @param {Array} citations - 引用列表
+ * @param {string|Object} pageContent - 分页内容
+ * @param {string} question - 用户问题
+ * @param {string} userApiKey - 用户API Key（可选）
  */
-async function evaluateRelevance(answer, knowledgeBase, citations, pageContent, question = null) {
+async function evaluateRelevance(answer, knowledgeBase, citations, pageContent, question = null, userApiKey = null) {
   if (!answer) {
     return {
       overallScore: 0,
@@ -311,7 +322,7 @@ async function evaluateRelevance(answer, knowledgeBase, citations, pageContent, 
   // 3. AI评估（异步，可能较慢）
   let aiEvaluation;
   try {
-    aiEvaluation = await aiEvaluate(answer, knowledgeBase, question);
+    aiEvaluation = await aiEvaluate(answer, knowledgeBase, question, userApiKey);
     console.log('[相关性评估] AI评估:', {
       relevanceScore: aiEvaluation.relevanceScore,
       basedOnKnowledgeBase: aiEvaluation.basedOnKnowledgeBase,

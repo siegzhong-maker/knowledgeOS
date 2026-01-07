@@ -537,7 +537,7 @@ router.post('/chat', async (req, res) => {
               
               // 等待评估完成后再发送[DONE]
               try {
-                const evaluationResult = await evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion);
+                const evaluationResult = await evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion, userApiKey);
                 console.log('[评估] 评估完成，分数:', evaluationResult.overallScore);
                 
                 // 在响应关闭前发送评估结果
@@ -631,7 +631,7 @@ router.post('/chat', async (req, res) => {
                       
                       // 等待评估完成后再发送[DONE]
                       try {
-                        const evaluationResult = await evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion);
+                        const evaluationResult = await evaluateRelevance(fullContent, pdfContent, citations, pageContent, userQuestion, userApiKey);
                         console.log('[评估] 评估完成，分数:', evaluationResult.overallScore);
                         
                         // 在响应关闭前发送评估结果
