@@ -79,6 +79,7 @@ let repoCurrentPage = 1; // 文档库当前页码
 let archiveTotalCount = 0; // 归档总数量
 let archiveLoadedCount = 0; // 归档已加载数量
 let archiveCurrentPage = 1; // 归档当前页码
+let repoLoading = false; // 文档库首屏加载状态
 
 // 批量渲染优化：使用requestAnimationFrame合并多个渲染调用
 let renderScheduled = false;
@@ -429,6 +430,24 @@ function renderCards() {
 
 // 渲染文档库列表
 function renderRepoList() {
+  if (!elRepoList) return;
+
+  // 首次进入文档库且数据仍在加载时，展示 loading 行而不是空态
+  if (repoLoading && allItems.length === 0) {
+    elRepoList.innerHTML = `
+      <tr>
+        <td colspan="6" class="px-6 py-16 text-center">
+          <div class="flex flex-col items-center justify-center max-w-md mx-auto text-slate-500">
+            <div class="w-10 h-10 mb-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-sm font-medium mb-1">正在加载文档列表...</p>
+            <p class="text-xs text-slate-400">首次进入会稍慢一点，请稍候</p>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
   const search = (elRepoSearchInput?.value || '').trim();
   let data = allItems;
   
@@ -2074,6 +2093,9 @@ async function loadItemsFast() {
   const timer = perfMonitor ? perfMonitor.start('load-items-fast') : null;
   
   try {
+    repoLoading = true;
+    scheduleRender('repoList');
+
     // 显示加载状态
     if (elDashboardSubtitle) {
       elDashboardSubtitle.textContent = '正在加载...';
@@ -2118,10 +2140,16 @@ async function loadItemsFast() {
       }, 1000);
     }
     
+    repoLoading = false;
+    scheduleRender('repoList');
+
     if (timer && perfMonitor) {
       perfMonitor.end(timer, { success: true, itemCount: newItems.length });
     }
   } catch (error) {
+    repoLoading = false;
+    scheduleRender('repoList');
+
     if (timer && perfMonitor) {
       perfMonitor.end(timer, { success: false, error: error.message });
     }
@@ -2137,6 +2165,9 @@ async function loadItemsFast() {
 // 使用分页加载以提高性能
 async function loadItems(reset = true) {
   try {
+    repoLoading = true;
+    scheduleRender('repoList');
+
     // 显示加载状态
     if (elDashboardSubtitle) {
       elDashboardSubtitle.textContent = '正在加载...';
@@ -2179,6 +2210,9 @@ async function loadItems(reset = true) {
       elDashboardSubtitle.textContent = '加载失败，请稍后重试';
     }
     showToast(error.message || '加载内容失败', 'error');
+  } finally {
+    repoLoading = false;
+    scheduleRender('repoList');
   }
 }
 
