@@ -10,7 +10,9 @@
     "migrate-pdf": "node backend/scripts/migrate-pdf-support.js",
     "migrate-kb": "node backend/scripts/migrate-to-multi-knowledge-bases.js",
     "migrate-to-pg": "node backend/scripts/migrate-sqlite-to-pg.js",
+    "migrate-all": "node backend/scripts/migrate-all-data.js",
     "migrate-via-api": "node backend/scripts/migrate-via-api.js",
+    "create-tables": "node backend/scripts/create-missing-tables.js",
     "diagnose": "node backend/scripts/diagnose.js",
     "postinstall": "npm run init-db || true"
   },
