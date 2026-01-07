@@ -1,4 +1,4 @@
-import { itemsAPI, parseAPI, aiAPI, settingsAPI, tagsAPI, exportAPI } from './api.js';
+import { itemsAPI, parseAPI, aiAPI, settingsAPI, tagsAPI, exportAPI, clearAPICache } from './api.js';
 import { storage } from './storage.js';
 import { formatTime, truncate, isURL, debounce, throttle, loadPDFJS } from './utils.js';
 import { showToast, showLoadingToast } from './toast.js';
@@ -1086,7 +1086,8 @@ async function handleRenameTag(oldTag, newTag) {
         await itemsAPI.update(item.id, { tags: newTags });
       }
 
-      // 重新加载数据
+      // 清除缓存并重新加载数据
+      clearAPICache();
       await loadItems();
       renderTagsCloud();
       loadingToast.close();
@@ -1125,7 +1126,8 @@ async function handleDeleteTag(tag) {
         await itemsAPI.update(item.id, { tags: newTags });
       }
 
-      // 重新加载数据
+      // 清除缓存并重新加载数据
+      clearAPICache();
       await loadItems();
       renderTagsCloud();
       loadingToast.close();
@@ -1342,8 +1344,11 @@ async function openDetail(item) {
           const currentKbId = getCurrentKnowledgeBaseId();
           // 不再显示toast，进度信息由底部进度条显示
           
-          await extractFromDocument(item.id, currentKbId, (progress) => {
+          await extractFromDocument(item.id, currentKbId, async (progress) => {
             if (progress.status === 'completed') {
+              // 清除缓存并刷新文档列表以显示更新后的提取状态
+              clearAPICache();
+              await loadItems();
               // 可选：自动跳转到知识库视图
               setTimeout(() => {
                 switchView('knowledge-items');
@@ -1467,8 +1472,11 @@ async function openDetail(item) {
           const currentKbId = getCurrentKnowledgeBaseId();
           // 不再显示toast，进度信息由底部进度条显示
           
-          await extractFromDocument(item.id, currentKbId, (progress) => {
+          await extractFromDocument(item.id, currentKbId, async (progress) => {
             if (progress.status === 'completed') {
+              // 清除缓存并刷新文档列表以显示更新后的提取状态
+              clearAPICache();
+              await loadItems();
               // 可选：自动跳转到知识库视图
               setTimeout(() => {
                 switchView('knowledge-items');
@@ -1567,16 +1575,26 @@ async function handleSaveEdit() {
         raw_content: newContent
       });
 
-      // 更新本地数据
-      currentItem.title = newTitle;
-      currentItem.raw_content = newContent;
-      allItems = allItems.map((it) =>
-        it.id === currentItem.id ? { ...it, title: newTitle, raw_content: newContent } : it
+      // 清除API缓存并重新加载数据，确保所有视图数据一致
+      clearAPICache();
+      await loadItems();
+
+      // 从最新数据中获取更新后的项
+      const updatedItem = allItems.find((it) => it.id === currentItem.id) || {
+        ...currentItem,
+        title: newTitle,
+        raw_content: newContent
+      };
+
+      // 同步更新当前项和归档列表
+      currentItem = updatedItem;
+      archivedItems = archivedItems.map((it) =>
+        it.id === currentItem.id ? { ...it, title: currentItem.title, raw_content: currentItem.raw_content } : it
       );
 
       isEditing = false;
       await openDetail(currentItem); // 重新渲染
-      scheduleRender(['cards', 'repoList']);
+      scheduleRender(['cards', 'repoList', 'archiveList']);
 
       loadingToast.close();
       showToast('保存成功', 'success');
@@ -1913,17 +1931,17 @@ function showTagSelectionModal(itemId, suggestedTags) {
       const newTags = [...existingTags, ...tagsToAdd];
       await itemsAPI.update(itemId, { tags: newTags });
       
-      // 更新本地数据
-      allItems = allItems.map((it) =>
-        it.id === itemId ? { ...it, tags: newTags } : it
-      );
+      // 清除缓存并重新从服务器加载数据，确保所有视图数据一致
+      clearAPICache();
+      await loadItems();
       
+      // 如果正在查看该项，重新打开详情以显示最新数据
       if (currentItem && currentItem.id === itemId) {
-        currentItem.tags = newTags;
-        await openDetail(currentItem);
+        const updatedItem = allItems.find(it => it.id === itemId);
+        if (updatedItem) {
+          await openDetail(updatedItem);
+        }
       }
-      
-      scheduleRender(['cards', 'repoList', 'tagsCloud']);
       
       closeModal();
       showToast(`已添加 ${tagsToAdd.length} 个标签`, 'success');
@@ -2655,6 +2673,9 @@ function bindEvents() {
           // 开始提取
           await extractFromDocument(id, currentKbId, async (progress) => {
             if (progress.status === 'completed') {
+              // 清除缓存并刷新文档列表以显示更新后的提取状态
+              clearAPICache();
+              await loadItems();
               // 显示成功提示
               const { showToast } = await import('./toast.js');
               showToast(
@@ -2693,8 +2714,15 @@ function bindEvents() {
           const loadingToast = showLoadingToast('正在归档...');
           try {
             await itemsAPI.archive(id);
-            allItems = allItems.filter((it) => it.id !== id);
-            scheduleRender(['cards', 'repoList', 'tagsCloud']);
+            // 清除缓存，避免读取到旧数据
+            clearAPICache();
+            // 关闭详情面板（如果正在查看被归档的项）
+            if (currentItem && currentItem.id === id) {
+              closeDetail();
+            }
+            // 重新从服务器加载数据，确保所有视图数据一致
+            await loadItems();
+            // 更新统计信息
             if (stats) {
               stats.total = (stats.total || 0) - 1;
               updateDashboardStats();
@@ -2718,8 +2746,15 @@ function bindEvents() {
           const loadingToast = showLoadingToast('正在删除...');
           try {
             await itemsAPI.delete(id);
-            allItems = allItems.filter((it) => it.id !== id);
-            scheduleRender(['cards', 'repoList', 'tagsCloud']);
+            // 清除缓存，避免读取到旧数据
+            clearAPICache();
+            // 关闭详情面板（如果正在查看被删除的项）
+            if (currentItem && currentItem.id === id) {
+              closeDetail();
+            }
+            // 重新从服务器加载数据，确保所有视图数据一致
+            await loadItems();
+            // 更新统计信息
             if (stats) {
               stats.total = (stats.total || 0) - 1;
               updateDashboardStats();
@@ -2771,9 +2806,11 @@ function bindEvents() {
           const loadingToast = showLoadingToast('正在恢复...');
           try {
             await itemsAPI.restore(id);
-            archivedItems = archivedItems.filter((it) => it.id !== id);
+            // 清除缓存，避免读取到旧数据
+            clearAPICache();
+            // 重新加载文档库和归档列表，确保数据一致
             await loadItems();
-            renderArchiveList();
+            await loadArchivedItems();
             if (stats) {
               stats.total = (stats.total || 0) + 1;
               stats.archived = (stats.archived || 0) - 1;
@@ -2798,8 +2835,15 @@ function bindEvents() {
           const loadingToast = showLoadingToast('正在永久删除...');
           try {
             await itemsAPI.permanentDelete(id);
-            archivedItems = archivedItems.filter((it) => it.id !== id);
-            renderArchiveList();
+            // 清除缓存，避免读取到旧数据
+            clearAPICache();
+            // 关闭详情面板（如果正在查看被删除的项）
+            if (currentItem && currentItem.id === id) {
+              closeDetail();
+            }
+            // 重新从服务器加载归档列表，确保数据一致
+            await loadArchivedItems();
+            // 更新统计信息
             if (stats) {
               stats.archived = (stats.archived || 0) - 1;
               updateDashboardStats();
@@ -3115,6 +3159,15 @@ function bindEvents() {
 async function init() {
   try {
     console.log('开始初始化应用...');
+    
+    // 0. 初始化全局图标（包括左侧导航等静态区域）
+    if (window.lucide) {
+      try {
+        window.lucide.createIcons();
+      } catch (e) {
+        console.warn('初始化图标失败:', e);
+      }
+    }
     
     // 1. 立即显示页面框架（不等待任何数据）
     bindEvents();

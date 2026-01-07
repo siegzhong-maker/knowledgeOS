@@ -201,6 +201,10 @@ export async function initConsultation() {
       const { knowledgeBaseId, knowledgeBase } = e.detail;
       console.log('知识库切换:', knowledgeBaseId, knowledgeBase);
       
+      // 清除API缓存，确保获取最新数据
+      const { clearAPICache } = await import('./api.js');
+      clearAPICache();
+      
       // 重新加载PDF列表
       await loadPDFList();
       
