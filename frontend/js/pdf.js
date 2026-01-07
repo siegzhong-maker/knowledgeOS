@@ -226,9 +226,21 @@ export async function renderPDFContent(pdfData, container) {
               continue;
             }
             
-            // 其他错误或重试次数用完，抛出错误
+            // 其他错误或重试次数用完，尝试获取详细错误信息
+            let errorDetails = null;
             if (testResponse.status === 404) {
-              throw new Error('PDF文件访问失败: 404 文件未找到');
+              try {
+                const errorData = await testResponse.json();
+                if (errorData.details) {
+                  errorDetails = errorData.details;
+                }
+              } catch (e) {
+                // 忽略JSON解析错误
+              }
+              const error = new Error('PDF文件访问失败: 404 文件未找到');
+              error.status = 404;
+              error.details = errorDetails;
+              throw error;
             } else if (testResponse.status === 403) {
               throw new Error('PDF文件访问失败: 403 权限不足');
             } else {
@@ -293,7 +305,8 @@ export async function renderPDFContent(pdfData, container) {
         pdfId: pdfData.id,
         file_path: pdfData.file_path,
         hasPdfJs: typeof pdfjsLib !== 'undefined',
-        workerSrc: typeof pdfjsLib !== 'undefined' ? pdfjsLib.GlobalWorkerOptions?.workerSrc : 'N/A'
+        workerSrc: typeof pdfjsLib !== 'undefined' ? pdfjsLib.GlobalWorkerOptions?.workerSrc : 'N/A',
+        errorDetails: error.details
       });
       
       // 根据错误类型提供更友好的提示
@@ -302,10 +315,13 @@ export async function renderPDFContent(pdfData, container) {
       let errorTitle = 'PDF加载失败';
       let showTextFallback = true;
       
+      // 从错误对象中获取详细错误信息（如果之前已经获取过）
+      const errorDetails = error.details || null;
+      
       // 针对404错误提供更友好的提示
       if (error.message && error.message.includes('404')) {
         errorTitle = 'PDF文件未找到';
-        errorMessage = '文件可能已被删除或路径不正确';
+        errorMessage = errorDetails?.suggestion || '文件可能已被删除或路径不正确';
         errorIcon = 'file-question';
         showTextFallback = false; // 404时不需要降级到文本显示
       } else if (error.message && error.message.includes('403')) {
@@ -322,6 +338,22 @@ export async function renderPDFContent(pdfData, container) {
           <i data-lucide="${errorIcon}" size="64" class="text-slate-300 mb-6"></i>
           <h3 class="text-base font-semibold text-slate-700 mb-2">${errorTitle}</h3>
           <p class="text-sm text-slate-500 mb-6 text-center max-w-md">${errorMessage}</p>
+          ${errorDetails ? `
+            <details class="text-xs text-slate-400 mb-4 w-full max-w-md">
+              <summary class="cursor-pointer hover:text-slate-600 mb-2">查看详细信息</summary>
+              <div class="mt-2 p-3 bg-slate-50 rounded text-left">
+                ${errorDetails.itemTitle ? `<p class="mb-1"><strong>文档:</strong> ${errorDetails.itemTitle}</p>` : ''}
+                ${errorDetails.file_path ? `<p class="mb-1"><strong>文件路径:</strong> ${errorDetails.file_path}</p>` : ''}
+                ${errorDetails.attemptedPaths && errorDetails.attemptedPaths.length > 0 ? `
+                  <p class="mb-1"><strong>尝试的路径:</strong></p>
+                  <ul class="list-disc list-inside mb-2 text-xs">
+                    ${errorDetails.attemptedPaths.slice(0, 3).map(p => `<li>${p.path}</li>`).join('')}
+                  </ul>
+                ` : ''}
+                ${errorDetails.suggestion ? `<p class="mt-2 text-slate-600"><strong>建议:</strong> ${errorDetails.suggestion}</p>` : ''}
+              </div>
+            </details>
+          ` : ''}
           ${showTextFallback ? `
             <div class="flex items-center gap-2 text-xs text-slate-400">
               <i data-lucide="loader-2" size="14" class="animate-spin"></i>

@@ -150,14 +150,19 @@ router.get('/pdf/:id', async (req, res) => {
       console.error('3. 文件是否存在于Volume中');
       console.error('4. 数据库中的file_path是否正确');
       
+      // 返回更详细的错误信息，帮助前端显示友好的错误提示
       return res.status(404).json({ 
         success: false, 
-        message: 'PDF文件未找到。请检查Volume挂载和文件路径配置。',
+        error: 'MissingPDF',
+        message: 'PDF文件未找到',
         details: {
+          itemId: id,
+          itemTitle: item.title || '未知文档',
           attemptedPaths: possiblePaths.map(p => ({ path: p.path, reason: p.reason })),
           uploadsDir,
           file_path: item.file_path,
-          nodeEnv: process.env.NODE_ENV || '未设置'
+          nodeEnv: process.env.NODE_ENV || '未设置',
+          suggestion: '文件可能已被删除、路径不正确，或Volume未正确挂载。请运行 npm run check-pdfs 检查所有PDF文件状态。'
         }
       });
     }

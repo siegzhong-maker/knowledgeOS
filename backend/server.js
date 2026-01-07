@@ -49,6 +49,27 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true, message: '服务运行正常' });
 });
 
+// PDF文件检查端点（用于Railway部署）
+app.get('/api/diagnose/pdfs', async (req, res) => {
+  try {
+    const { checkMissingPDFs } = require('./scripts/check-missing-pdfs');
+    const result = await checkMissingPDFs();
+    
+    res.json({
+      success: true,
+      data: result,
+      message: `检查完成：共 ${result.total} 个PDF，${result.existing} 个存在，${result.missing} 个缺失`
+    });
+  } catch (error) {
+    console.error('PDF检查失败:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'PDF检查失败',
+      error: error.stack
+    });
+  }
+});
+
 // 文件系统诊断端点
 app.get('/api/diagnose/files', async (req, res) => {
   try {

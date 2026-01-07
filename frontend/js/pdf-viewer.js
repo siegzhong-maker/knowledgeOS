@@ -714,28 +714,59 @@ export async function initPDFViewer(pdfUrl, container, options = {}) {
     });
     
     let errorMessage = error.message || '未知错误';
+    let errorTitle = '加载PDF失败';
+    let errorIcon = 'file-x';
+    let showDetails = false;
+    
     if (error.name === 'MissingPDFException' || error.name === 'InvalidPDFException') {
-      errorMessage = 'PDF文件格式无效或损坏，请检查文件';
+      errorTitle = 'PDF文件无法加载';
+      errorMessage = '文件可能不存在、已损坏或格式不正确';
+      errorIcon = 'file-question';
+      showDetails = true;
     } else if (error.message && error.message.includes('404')) {
-      errorMessage = 'PDF文件未找到（404错误），请检查文件路径';
+      errorTitle = 'PDF文件未找到';
+      errorMessage = '服务器上找不到此文件，可能已被删除或路径不正确';
+      errorIcon = 'file-x';
+      showDetails = true;
     } else if (error.message && error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      errorTitle = '网络连接失败';
       errorMessage = '无法连接到服务器，请检查网络连接';
+      errorIcon = 'wifi-off';
     } else if (error.message && error.message.includes('Worker')) {
+      errorTitle = 'PDF.js加载失败';
       errorMessage = 'PDF.js Worker加载失败，请刷新页面重试';
+      errorIcon = 'refresh-cw';
     }
     
     container.innerHTML = `
-      <div class="flex flex-col items-center justify-center py-20">
-        <i data-lucide="file-x" size="48" class="text-red-400 mb-4"></i>
-        <p class="text-sm text-red-600 mb-2">加载PDF失败</p>
-        <p class="text-xs text-slate-500 mb-4">${errorMessage}</p>
-        <p class="text-xs text-slate-400">PDF URL: ${pdfUrl}</p>
-        <button 
-          onclick="location.reload()" 
-          class="mt-4 px-4 py-2 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
-        >
-          刷新页面
-        </button>
+      <div class="flex flex-col items-center justify-center py-20 px-4">
+        <i data-lucide="${errorIcon}" size="48" class="text-red-400 mb-4"></i>
+        <p class="text-sm font-semibold text-red-600 mb-2">${errorTitle}</p>
+        <p class="text-xs text-slate-500 mb-4 text-center max-w-md">${errorMessage}</p>
+        ${showDetails ? `
+          <details class="text-xs text-slate-400 mb-4 w-full max-w-md">
+            <summary class="cursor-pointer hover:text-slate-600 mb-2">查看详细信息</summary>
+            <div class="mt-2 p-3 bg-slate-50 rounded text-left">
+              <p class="mb-1"><strong>URL:</strong> ${pdfUrl}</p>
+              <p class="mb-1"><strong>错误类型:</strong> ${error.name || 'Unknown'}</p>
+              <p><strong>错误信息:</strong> ${error.message || '无详细信息'}</p>
+            </div>
+          </details>
+        ` : ''}
+        <div class="flex gap-2">
+          <button 
+            onclick="location.reload()" 
+            class="px-4 py-2 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+          >
+            刷新页面
+          </button>
+          <button 
+            onclick="window.history.back()" 
+            class="px-4 py-2 text-xs bg-slate-200 text-slate-700 rounded hover:bg-slate-300 transition-colors"
+          >
+            返回
+          </button>
+        </div>
       </div>
     `;
     if (window.lucide) {
