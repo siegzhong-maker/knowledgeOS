@@ -4,35 +4,61 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KnowledgeOS</title>
-  <!-- Tailwind CSS -->
+  
+  <!-- DNS 预解析和预连接优化 -->
+  <link rel="dns-prefetch" href="https://cdn.tailwindcss.com" />
+  <link rel="dns-prefetch" href="https://unpkg.com" />
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
+  <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+  <link rel="dns-prefetch" href="https://d3js.org" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  
+  <!-- 关键资源：Tailwind CSS（同步加载，阻塞渲染） -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <!-- FontAwesome (保留用于现有功能) -->
+  
+  <!-- 关键资源：Lucide Icons（同步加载，但使用 defer 优化） -->
+  <script src="https://unpkg.com/lucide@latest" defer></script>
+  
+  <!-- 非关键资源：FontAwesome（异步加载） -->
   <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
     referrerpolicy="no-referrer"
+    media="print"
+    onload="this.media='all'"
   />
+  <noscript>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+  </noscript>
+  
+  <!-- 字体（异步加载） -->
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
     rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
   />
-  <!-- Marked.js for Markdown parsing -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-  <!-- PDF.js for PDF rendering -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- D3.js for knowledge graph -->
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script>
-    // 配置PDF.js Worker（必须在PDF.js加载后立即配置）
-    if (typeof pdfjsLib !== 'undefined') {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      console.log('✓ PDF.js Worker已配置:', pdfjsLib.GlobalWorkerOptions.workerSrc);
-    } else {
-      console.error('PDF.js未加载');
-    }
-  </script>
+  <noscript>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </noscript>
+  
+  <!-- Marked.js for Markdown parsing（按需加载，使用 defer） -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js" defer></script>
+  
+  <!-- PDF.js 和 D3.js 改为按需动态加载，不在此处加载 -->
+  <!-- 这些库只在需要时（打开PDF或知识图谱）才加载 -->
   <style>
     body {
       font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont,
@@ -2234,6 +2260,20 @@
         }
       };
     });
+  </script>
+  
+  <!-- 性能测试脚本（仅开发环境） -->
+  <script>
+    // 只在本地开发环境加载测试脚本
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      const testScript = document.createElement('script');
+      testScript.src = './test-performance.js';
+      testScript.onload = () => {
+        console.log('💡 性能测试工具已加载！');
+        console.log('   运行 window.testPerformance.runAllTests() 开始测试');
+      };
+      document.head.appendChild(testScript);
+    }
   </script>
 </body>
 </html>

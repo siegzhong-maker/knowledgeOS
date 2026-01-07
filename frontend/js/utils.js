@@ -105,3 +105,71 @@ export function generateId() {
   });
 }
 
+// 动态加载 PDF.js
+let pdfjsLoading = null;
+export async function loadPDFJS() {
+  if (typeof pdfjsLib !== 'undefined') {
+    return pdfjsLib;
+  }
+  
+  if (pdfjsLoading) {
+    return pdfjsLoading;
+  }
+  
+  pdfjsLoading = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.async = true;
+    script.onload = () => {
+      if (typeof pdfjsLib !== 'undefined') {
+        // 配置 Worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        console.log('✓ PDF.js 已动态加载');
+        resolve(pdfjsLib);
+      } else {
+        reject(new Error('PDF.js 加载失败'));
+      }
+    };
+    script.onerror = () => {
+      pdfjsLoading = null;
+      reject(new Error('PDF.js 脚本加载失败'));
+    };
+    document.head.appendChild(script);
+  });
+  
+  return pdfjsLoading;
+}
+
+// 动态加载 D3.js
+let d3Loading = null;
+export async function loadD3() {
+  if (typeof d3 !== 'undefined') {
+    return d3;
+  }
+  
+  if (d3Loading) {
+    return d3Loading;
+  }
+  
+  d3Loading = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://d3js.org/d3.v7.min.js';
+    script.async = true;
+    script.onload = () => {
+      if (typeof d3 !== 'undefined') {
+        console.log('✓ D3.js 已动态加载');
+        resolve(d3);
+      } else {
+        reject(new Error('D3.js 加载失败'));
+      }
+    };
+    script.onerror = () => {
+      d3Loading = null;
+      reject(new Error('D3.js 脚本加载失败'));
+    };
+    document.head.appendChild(script);
+  });
+  
+  return d3Loading;
+}
+

@@ -292,49 +292,64 @@ router.get('/items', async (req, res) => {
       params.push(searchTerm, searchTerm);
     }
 
-    // 获取总数
-    const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as count');
+    // 获取总数（在 JOIN 之前，使用原始表名）
+    const countSql = sql.replace('SELECT * FROM personal_knowledge_items', 'SELECT COUNT(*) as count FROM personal_knowledge_items');
     const countResult = await db.get(countSql, params);
     const total = countResult?.count || 0;
 
-    // 排序和分页
-    sql += ' ORDER BY created_at DESC';
+    // 排序和分页 - 使用 LEFT JOIN 一次性获取子分类信息，避免 N+1 查询
+    sql = sql.replace(
+      'SELECT * FROM personal_knowledge_items',
+      `SELECT 
+        pki.*,
+        cs.id as subcat_id,
+        cs.category as subcat_category,
+        cs.name as subcat_name,
+        cs.keywords as subcat_keywords
+      FROM personal_knowledge_items pki
+      LEFT JOIN category_subcategories cs ON pki.subcategory_id = cs.id`
+    );
+    
+    sql += ' ORDER BY pki.created_at DESC';
     sql += ` LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
 
     const items = await db.all(sql, params);
 
-    // 解析JSON字段并添加分类和子分类信息
-    const itemsWithParsed = await Promise.all(items.map(async (item) => {
+    // 解析JSON字段并添加分类和子分类信息（不再需要单独查询）
+    const itemsWithParsed = items.map((item) => {
       const tags = JSON.parse(item.tags || '[]');
       const category = item.category || getCategoryFromTags(tags);
       
-      // 获取子分类信息
+      // 从 JOIN 结果中获取子分类信息
       let subcategory = null;
-      if (item.subcategory_id) {
-        const subcat = await db.get(
-          'SELECT id, category, name, keywords FROM category_subcategories WHERE id = ?',
-          [item.subcategory_id]
-        );
-        if (subcat) {
-          subcategory = {
-            id: subcat.id,
-            name: subcat.name,
-            keywords: JSON.parse(subcat.keywords || '[]')
-          };
-        }
+      if (item.subcat_id) {
+        subcategory = {
+          id: item.subcat_id,
+          name: item.subcat_name,
+          keywords: JSON.parse(item.subcat_keywords || '[]')
+        };
       }
       
+      // 移除 JOIN 产生的临时字段，保留原始字段
+      const {
+        subcat_id,
+        subcat_category,
+        subcat_name,
+        subcat_keywords,
+        ...cleanItem
+      } = item;
+      
       return {
-        ...item,
+        ...cleanItem,
         tags,
-        keyConclusions: JSON.parse(item.key_conclusions || '[]'),
-        metadata: item.metadata ? JSON.parse(item.metadata) : {},
+        keyConclusions: JSON.parse(cleanItem.key_conclusions || '[]'),
+        metadata: cleanItem.metadata ? JSON.parse(cleanItem.metadata) : {},
         category, // 添加分类字段
-        subcategory_id: item.subcategory_id || null,
+        subcategory_id: cleanItem.subcategory_id || null,
         subcategory // 添加子分类信息
       };
-    }));
+    });
 
     res.json({
       success: true,

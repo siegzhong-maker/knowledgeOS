@@ -2,6 +2,7 @@
  * PDF查看器组件
  * 使用PDF.js渲染PDF文件
  */
+import { loadPDFJS } from './utils.js';
 
 /**
  * 初始化PDF查看器
@@ -15,13 +16,16 @@ export async function initPDFViewer(pdfUrl, container, options = {}) {
     return null;
   }
 
-  // 检查PDF.js是否加载
-  if (typeof pdfjsLib === 'undefined') {
-    console.error('PDF.js未加载，请检查CDN或本地文件');
+  // 动态加载 PDF.js
+  let pdfjsLib;
+  try {
+    pdfjsLib = await loadPDFJS();
+  } catch (error) {
+    console.error('PDF.js 加载失败:', error);
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center py-20">
-        <p class="text-sm text-red-600 mb-2">PDF.js未加载</p>
-        <p class="text-xs text-slate-500">请刷新页面重试</p>
+        <p class="text-sm text-red-600 mb-2">PDF.js 加载失败</p>
+        <p class="text-xs text-slate-500">${error.message}</p>
       </div>
     `;
     return null;

@@ -1,6 +1,6 @@
 import { itemsAPI, parseAPI, aiAPI, settingsAPI, tagsAPI, exportAPI } from './api.js';
 import { storage } from './storage.js';
-import { formatTime, truncate, isURL, debounce, throttle } from './utils.js';
+import { formatTime, truncate, isURL, debounce, throttle, loadPDFJS } from './utils.js';
 import { showToast, showLoadingToast } from './toast.js';
 
 // 配置 Marked.js
@@ -2061,7 +2061,13 @@ async function loadItems(reset = true) {
     console.log(`加载了 ${newItems.length} 个项目，已加载 ${repoLoadedCount}/${repoTotalCount}`);
     
     scheduleRender(['cards', 'repoList', 'tagsCloud']);
-    await loadDashboardStats();
+    
+    // 延迟加载非关键 API（stats），不阻塞主渲染
+    setTimeout(() => {
+      loadDashboardStats().catch(err => {
+        console.warn('统计信息加载失败（非关键）:', err);
+      });
+    }, 500);
     
     // 更新加载更多按钮状态
     updateLoadMoreButton('repo', hasMore);
@@ -3022,17 +3028,17 @@ async function initPDFViewer(itemId, filePath) {
       return;
     }
     
-    // 检查PDF.js是否已加载
-    if (typeof pdfjsLib === 'undefined') {
-      console.error('PDF.js未加载');
+    // 动态加载 PDF.js
+    let pdfjsLib;
+    try {
+      pdfjsLib = await loadPDFJS();
+    } catch (error) {
+      console.error('PDF.js 加载失败:', error);
       if (pageInfo) {
-        pageInfo.textContent = 'PDF.js未加载，请刷新页面';
+        pageInfo.textContent = 'PDF.js 加载失败，请刷新页面';
       }
       return;
     }
-    
-    // 设置PDF.js worker
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     
     // 获取PDF文件URL
     const pdfUrl = `/api/files/pdf/${itemId}`;

@@ -3,6 +3,13 @@ const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000/api' 
   : '/api';
 
+// 请求缓存（仅用于 GET 请求）
+const requestCache = new Map();
+const CACHE_TTL = 30000; // 30秒缓存
+
+// 进行中的请求（用于去重）
+const pendingRequests = new Map();
+
 // 获取用户API Key（如果已配置）
 async function getUserApiKey() {
   try {
@@ -15,12 +22,30 @@ async function getUserApiKey() {
 }
 
 async function apiRequest(endpoint, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const useCache = method === 'GET' && options.cache !== false;
+  const cacheKey = `${method}:${endpoint}:${JSON.stringify(options.body || {})}`;
+  
+  // 检查缓存（仅 GET 请求）
+  if (useCache && requestCache.has(cacheKey)) {
+    const cached = requestCache.get(cacheKey);
+    if (Date.now() - cached.timestamp < CACHE_TTL) {
+      return Promise.resolve(cached.data);
+    } else {
+      requestCache.delete(cacheKey);
+    }
+  }
+  
+  // 检查是否有相同的请求正在进行（去重）
+  if (pendingRequests.has(cacheKey)) {
+    return pendingRequests.get(cacheKey);
+  }
+  
   // 获取用户API Key
   const userApiKey = await getUserApiKey();
   
   // 处理URL和查询参数
   let url = `${API_BASE}${endpoint}`;
-  const method = (options.method || 'GET').toUpperCase();
   
   // 对于GET请求，通过query参数传递userApiKey
   if (method === 'GET' && userApiKey) {
@@ -47,62 +72,91 @@ async function apiRequest(endpoint, options = {}) {
     body
   };
 
-  try {
-    const response = await fetch(url, config);
-    
-    // 检查响应类型
-    const contentType = response.headers.get('content-type');
-    let data;
-    
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      // 如果不是JSON，读取文本内容
-      const text = await response.text();
-      console.error('非JSON响应:', text.substring(0, 200));
+  // 创建请求 Promise
+  const requestPromise = (async () => {
+    try {
+      const response = await fetch(url, config);
       
-      // 尝试解析为JSON（可能服务器返回了错误但格式不对）
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        // 如果解析失败，返回友好的错误信息
-        if (response.status === 404) {
-          throw new Error('请求的资源不存在，请检查API端点是否正确');
-        } else if (response.status === 500) {
-          throw new Error('服务器内部错误，请稍后重试');
-        } else {
-          throw new Error(`请求失败 (${response.status}): ${response.statusText}`);
+      // 检查响应类型
+      const contentType = response.headers.get('content-type');
+      let data;
+      
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        // 如果不是JSON，读取文本内容
+        const text = await response.text();
+        console.error('非JSON响应:', text.substring(0, 200));
+        
+        // 尝试解析为JSON（可能服务器返回了错误但格式不对）
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          // 如果解析失败，返回友好的错误信息
+          if (response.status === 404) {
+            throw new Error('请求的资源不存在，请检查API端点是否正确');
+          } else if (response.status === 500) {
+            throw new Error('服务器内部错误，请稍后重试');
+          } else {
+            throw new Error(`请求失败 (${response.status}): ${response.statusText}`);
+          }
         }
       }
-    }
-    
-    if (!response.ok) {
-      throw new Error(data.message || `HTTP ${response.status}`);
-    }
-    
-    return data;
-  } catch (error) {
-    console.error('API请求失败:', error);
-    // 如果是网络错误，提供更友好的提示
-    if (error.message.includes('fetch failed') || error.message.includes('Failed to fetch')) {
-      throw new Error('无法连接到服务器，请检查网络连接或服务器是否运行');
-    }
-    // 如果是HTTP错误，提供更详细的错误信息
-    if (error.message.includes('HTTP')) {
-      const statusMatch = error.message.match(/HTTP (\d+)/);
-      if (statusMatch) {
-        const status = statusMatch[1];
-        if (status === '404') {
-          throw new Error('请求的资源不存在');
-        } else if (status === '500') {
-          throw new Error('服务器内部错误，请稍后重试');
-        } else if (status === '403') {
-          throw new Error('没有权限访问该资源');
+      
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP ${response.status}`);
+      }
+      
+      // 缓存 GET 请求的响应
+      if (useCache) {
+        requestCache.set(cacheKey, {
+          data,
+          timestamp: Date.now()
+        });
+        // 限制缓存大小，避免内存泄漏
+        if (requestCache.size > 100) {
+          const firstKey = requestCache.keys().next().value;
+          requestCache.delete(firstKey);
         }
       }
+      
+      return data;
+    } catch (error) {
+      console.error('API请求失败:', error);
+      // 如果是网络错误，提供更友好的提示
+      if (error.message.includes('fetch failed') || error.message.includes('Failed to fetch')) {
+        throw new Error('无法连接到服务器，请检查网络连接或服务器是否运行');
+      }
+      // 如果是HTTP错误，提供更详细的错误信息
+      if (error.message.includes('HTTP')) {
+        const statusMatch = error.message.match(/HTTP (\d+)/);
+        if (statusMatch) {
+          const status = statusMatch[1];
+          if (status === '404') {
+            throw new Error('请求的资源不存在');
+          } else if (status === '500') {
+            throw new Error('服务器内部错误，请稍后重试');
+          } else if (status === '403') {
+            throw new Error('没有权限访问该资源');
+          }
+        }
+      }
+      throw error;
+    } finally {
+      // 请求完成后从 pendingRequests 中移除
+      pendingRequests.delete(cacheKey);
     }
-    throw error;
-  }
+  })();
+  
+  // 将请求添加到 pendingRequests（用于去重）
+  pendingRequests.set(cacheKey, requestPromise);
+  
+  return requestPromise;
+}
+
+// 清除缓存（用于强制刷新）
+export function clearAPICache() {
+  requestCache.clear();
 }
 
 // 知识项API

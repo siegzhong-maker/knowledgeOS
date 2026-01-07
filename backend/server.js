@@ -434,11 +434,19 @@ async function ensureDatabaseInitialized() {
       `);
       console.log('✓ category_subcategories表已创建');
 
-      // 创建索引
+      // 创建单列索引
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_type ON source_items(type)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_status ON source_items(status)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_created_at ON source_items(created_at DESC)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_knowledge_base_id ON source_items(knowledge_base_id)`);
+      
+      // 创建复合索引优化常用查询
+      // 优化：按知识库+状态+创建时间查询（文档列表常用）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_items_kb_status_created ON source_items(knowledge_base_id, status, created_at DESC)`);
+      // 优化：按类型+状态查询
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_items_type_status ON source_items(type, status)`);
+      // 优化：按状态+创建时间查询（排除archived）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_items_status_created ON source_items(status, created_at DESC) WHERE status != 'archived'`);
       
       // personal_knowledge_items 表索引
       await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_knowledge_base_id ON personal_knowledge_items(knowledge_base_id)`);
@@ -447,7 +455,19 @@ async function ensureDatabaseInitialized() {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_created_at ON personal_knowledge_items(created_at DESC)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_subcategory ON personal_knowledge_items(subcategory_id)`);
       
-      console.log('✓ 索引已创建');
+      // 创建复合索引优化常用查询
+      // 优化：按知识库+状态+创建时间查询（知识列表常用）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_kb_status_created ON personal_knowledge_items(knowledge_base_id, status, created_at DESC)`);
+      // 优化：按分类+状态查询
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_category_status ON personal_knowledge_items(category, status)`);
+      // 优化：按状态+创建时间查询（用于列表排序）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_status_created ON personal_knowledge_items(status, created_at DESC)`);
+      
+      // 优化 COUNT 查询：创建覆盖索引（包含常用查询字段）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_items_count_cover ON source_items(status, knowledge_base_id) WHERE status != 'archived'`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_count_cover ON personal_knowledge_items(status, knowledge_base_id)`);
+      
+      console.log('✓ 索引已创建（包括复合索引和覆盖索引）');
 
       console.log('✓ PostgreSQL数据库初始化完成');
     } else {

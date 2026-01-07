@@ -642,53 +642,72 @@ async function extractFromDocuments(itemIds, knowledgeBaseId, options = {}) {
         }))
       });
 
-      // 保存知识点
-      for (let j = 0; j < knowledgeItems.length; j++) {
-        const knowledgeItem = knowledgeItems[j];
-        const savedId = await saveKnowledgeItem(knowledgeItem, knowledgeBaseId);
-        results.knowledgeItemIds.push(savedId);
-        results.extractedCount++;
+      // 批量保存知识点（优化：减少数据库操作和进度更新频率）
+      const BATCH_SIZE = 5; // 每批保存 5 个知识点
+      const PROGRESS_UPDATE_INTERVAL = 3; // 每保存 3 个知识点更新一次进度
+      
+      for (let j = 0; j < knowledgeItems.length; j += BATCH_SIZE) {
+        const batch = knowledgeItems.slice(j, j + BATCH_SIZE);
         
-        // 添加到已提取列表
-        const savedItem = await db.get(
-          'SELECT id, title, content FROM personal_knowledge_items WHERE id = ?',
-          [savedId]
+        // 批量保存知识点
+        const batchPromises = batch.map(knowledgeItem => 
+          saveKnowledgeItem(knowledgeItem, knowledgeBaseId)
         );
-        if (savedItem) {
-          results.knowledgeItems.push({
-            id: savedItem.id,
-            title: savedItem.title,
-            content: savedItem.content.substring(0, 100) + '...'
+        const savedIds = await Promise.all(batchPromises);
+        
+        // 批量获取保存的知识点详情（减少数据库查询）
+        if (savedIds.length > 0) {
+          const placeholders = savedIds.map(() => '?').join(',');
+          const savedItems = await db.all(
+            `SELECT id, title, content FROM personal_knowledge_items WHERE id IN (${placeholders})`,
+            savedIds
+          );
+          
+          // 添加到结果
+          savedIds.forEach(id => results.knowledgeItemIds.push(id));
+          results.extractedCount += savedIds.length;
+          
+          savedItems.forEach(item => {
+            results.knowledgeItems.push({
+              id: item.id,
+              title: item.title,
+              content: item.content.substring(0, 100) + '...'
+            });
           });
         }
         
-        // 更新保存进度
-        const savingStageProgress = (j + 1) / knowledgeItems.length;
-        const savingDocProgress = calculateStageProgress('saving', savingStageProgress);
-        const savingBaseProgress = (results.processedItems / itemIds.length) * 100;
-        const savingCurrentDocProgress = (savingDocProgress / itemIds.length) * 100;
-        const savingTotalProgress = Math.min(100, Math.round(savingBaseProgress + savingCurrentDocProgress));
+        // 减少进度更新频率：每保存 PROGRESS_UPDATE_INTERVAL 个知识点或批次结束时更新
+        const shouldUpdateProgress = (j + batch.length) % PROGRESS_UPDATE_INTERVAL === 0 || 
+                                      (j + batch.length) >= knowledgeItems.length;
         
-        // 记录进度历史（用于ETA计算）
-        progressHistory.push({
-          progress: savingTotalProgress,
-          timestamp: Date.now()
-        });
-        // 只保留最近10条记录
-        if (progressHistory.length > 10) {
-          progressHistory.shift();
+        if (shouldUpdateProgress) {
+          const savingStageProgress = Math.min(1, (j + batch.length) / knowledgeItems.length);
+          const savingDocProgress = calculateStageProgress('saving', savingStageProgress);
+          const savingBaseProgress = (results.processedItems / itemIds.length) * 100;
+          const savingCurrentDocProgress = (savingDocProgress / itemIds.length) * 100;
+          const savingTotalProgress = Math.min(100, Math.round(savingBaseProgress + savingCurrentDocProgress));
+          
+          // 记录进度历史（用于ETA计算）
+          progressHistory.push({
+            progress: savingTotalProgress,
+            timestamp: Date.now()
+          });
+          // 只保留最近10条记录
+          if (progressHistory.length > 10) {
+            progressHistory.shift();
+          }
+          
+          updateProgress({
+            extractionId,
+            stage: 'saving',
+            processedItems: results.processedItems,
+            totalItems: itemIds.length,
+            extractedCount: results.extractedCount,
+            currentDocIndex,
+            progress: savingTotalProgress,
+            knowledgeItems: results.knowledgeItems.slice(-5)
+          });
         }
-        
-        updateProgress({
-          extractionId,
-          stage: 'saving',
-          processedItems: results.processedItems,
-          totalItems: itemIds.length,
-          extractedCount: results.extractedCount,
-          currentDocIndex,
-          progress: savingTotalProgress,
-          knowledgeItems: results.knowledgeItems.slice(-5)
-        });
       }
 
       // 文档处理完成

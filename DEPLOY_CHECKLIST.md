@@ -1,135 +1,176 @@
-# 部署检查清单
+# 部署前检查清单
 
-部署前的快速检查清单，确保一切配置正确。
+## ✅ 代码检查
 
-## ✅ 部署前检查
+- [x] 修复了 API 重复声明错误（`api.js`）
+- [x] 修复了 COUNT 查询问题（`knowledge.js`）
+- [x] 所有性能优化已完成
+- [x] 代码已通过 lint 检查
 
-### 1. 代码提交
-- [ ] 所有更改已提交到Git
-- [ ] 代码已推送到GitHub仓库
+## 📦 部署准备
 
-### 2. Railway项目配置
+### 1. Git 提交
+```bash
+# 检查当前状态
+git status
 
-#### 基础服务
-- [ ] Railway项目已创建
-- [ ] Web服务已配置（自动检测或手动创建）
-- [ ] PostgreSQL数据库服务已添加
+# 添加所有更改
+git add .
 
-#### 环境变量
-在Railway服务页面的 **Variables** 标签中检查：
+# 提交更改
+git commit -m "性能优化：修复 N+1 查询、优化资源加载、添加缓存等"
 
-- [ ] `DATABASE_URL` - 应该自动从Postgres服务注入（格式：`${{Postgres.DATABASE_URL}}`）
-- [ ] `NODE_ENV` = `production`（可选但推荐）
-- [ ] `DB_TYPE` = `postgres`（可选，明确指定数据库类型）
-
-#### Railway Volume（重要！）
-**这是本次优化的关键配置，用于PDF文件持久化存储**
-
-1. 在Railway服务页面，点击 **Settings**
-2. 滚动到 **Volumes** 部分
-3. [ ] 点击 **"+ New Volume"**
-4. [ ] **Mount Path**: `/data/uploads`
-5. [ ] **Name**: `uploads`（可选）
-6. [ ] 点击 **Add** 保存
-
-> **注意**：如果没有配置Volume，PDF文件在重新部署后会丢失！
-
-### 3. 部署验证
-
-部署后，检查以下日志信息：
-
-#### 启动日志应包含：
-```
-✓ 上传目录已准备: /data/uploads
-✓ 数据库连接成功
-✓ PostgreSQL数据库初始化完成
-✓ 服务器运行在 http://localhost:3000
+# 推送到远程仓库
+git push origin main
 ```
 
-#### 验证端点：
-- [ ] 访问 `https://your-app.up.railway.app/api/health`
-  - 应返回：`{"success":true,"message":"服务运行正常"}`
+### 2. Railway 部署检查
 
-#### 功能测试：
-- [ ] 可以访问应用首页
-- [ ] 可以上传PDF文件
-- [ ] PDF文件可以正常查看（包含图片）
-- [ ] 数据加载速度正常（分页加载，不卡顿）
+#### 环境变量确认
+- [ ] `DATABASE_URL` - Railway 会自动注入（PostgreSQL）
+- [ ] `NODE_ENV` = `production`（可选，Railway 会自动设置）
+- [ ] `PORT` - Railway 会自动设置
 
-## 🚀 快速部署步骤
+#### 服务配置确认
+- [ ] Web 服务已连接 GitHub 仓库
+- [ ] PostgreSQL 数据库服务已创建
+- [ ] 数据库服务已连接到 Web 服务
 
-### 首次部署
+### 3. 部署后验证步骤
 
-1. **推送代码到GitHub**
-   ```bash
-   git add .
-   git commit -m "性能优化：PDF持久化、分页加载、用户体验改进"
-   git push origin main
+#### 步骤 1：检查部署日志
+1. 在 Railway 项目页面，查看最新部署
+2. 确认：
+   - ✅ 构建成功
+   - ✅ 数据库连接成功
+   - ✅ 应用启动成功
+   - ✅ 数据库表初始化成功
+
+#### 步骤 2：健康检查
+访问：`https://your-app.up.railway.app/api/health`
+
+应该返回：
+```json
+{"success":true,"message":"服务运行正常"}
+```
+
+#### 步骤 3：前端功能测试
+1. **页面加载速度**
+   - 打开应用首页
+   - 使用 Chrome DevTools Performance 面板
+   - 检查 LCP 应该 < 2.5 秒
+
+2. **数据加载测试**
+   - 打开"文档库"页面
+   - 确认文档列表正常加载
+   - 打开"知识库"页面
+   - 确认知识列表正常加载（应该比之前快很多）
+
+3. **资源加载检查**
+   - 打开 Network 面板
+   - 刷新页面
+   - 确认：
+     - ✅ PDF.js 和 D3.js 不在初始加载中
+     - ✅ 有多个 preconnect 和 dns-prefetch 链接
+     - ✅ 非关键资源异步加载
+
+4. **API 性能测试**
+   - 打开控制台
+   - 运行性能测试（如果可用）：
+   ```javascript
+   // 测试知识列表 API
+   const start = performance.now();
+   await fetch('/api/knowledge/items?limit=50');
+   console.log('响应时间:', performance.now() - start, 'ms');
    ```
 
-2. **在Railway中配置Volume**
-   - 打开Railway服务页面
-   - Settings → Volumes → + New Volume
-   - Mount Path: `/data/uploads`
-   - 保存
+#### 步骤 4：功能完整性测试
+- [ ] 文档上传功能正常
+- [ ] 知识提取功能正常
+- [ ] 知识列表显示正常
+- [ ] 搜索和筛选功能正常
+- [ ] PDF 查看器正常（按需加载）
+- [ ] 知识图谱正常（按需加载）
 
-3. **等待自动部署**
-   - Railway会自动检测GitHub推送
-   - 查看Deployments标签页监控部署进度
+## 🐛 常见问题排查
 
-4. **验证部署**
-   - 检查部署日志
-   - 访问应用URL
-   - 测试PDF上传和查看功能
+### 问题 1：部署失败
+**检查：**
+- 查看 Railway 部署日志
+- 确认 Node.js 版本 >= 20
+- 确认所有依赖已安装
 
-### 重新部署（更新代码）
+### 问题 2：数据库连接失败
+**检查：**
+- 确认 PostgreSQL 服务状态为 "Online"
+- 确认 `DATABASE_URL` 环境变量已自动注入
+- 查看应用日志中的数据库连接信息
 
-1. **推送新代码**
-   ```bash
-   git push origin main
-   ```
+### 问题 3：数据加载失败
+**检查：**
+- 打开浏览器控制台，查看错误信息
+- 检查 Network 面板，查看 API 请求状态
+- 确认数据库表已正确初始化
 
-2. **Railway自动部署**
-   - 无需额外配置
-   - Volume中的数据会保留
+### 问题 4：性能没有改善
+**检查：**
+- 清除浏览器缓存
+- 使用无痕模式测试
+- 检查 Network 面板，确认资源按需加载
+- 检查 API 响应时间
 
-## ⚠️ 常见问题
+## 📊 性能对比
 
-### PDF文件丢失
-- **原因**：未配置Railway Volume
-- **解决**：按照上面的步骤配置Volume，路径为 `/data/uploads`
+部署后，记录以下指标并与优化前对比：
 
-### 数据库连接失败
-- **检查**：Postgres服务状态是否为"Online"
-- **检查**：环境变量 `DATABASE_URL` 是否正确设置
-- **查看**：部署日志中的数据库连接信息
+| 指标 | 优化前 | 优化后 | 改善 |
+|------|--------|--------|------|
+| LCP | 5.99 秒 | ? | ? |
+| 知识列表 API | 慢 | ? | ? |
+| 页面加载时间 | 慢 | ? | ? |
+| Performance Score | < 50 | ? | ? |
 
-### 部署失败
-- **查看**：Deployments标签页的详细错误日志
-- **检查**：代码是否有语法错误
-- **检查**：package.json中的依赖是否正确
+## 🚀 快速部署命令
 
-### PDF图片不显示
-- **检查**：浏览器控制台是否有错误
-- **检查**：PDF文件URL是否可访问（`/api/files/pdf/:id`）
-- **查看**：网络请求是否返回200状态码
+如果使用 Railway CLI：
 
-## 📝 环境变量参考
+```bash
+# 安装 Railway CLI（如果还没有）
+npm i -g @railway/cli
 
-### 必需（自动注入）
-- `DATABASE_URL` - PostgreSQL连接字符串
+# 登录
+railway login
 
-### 推荐
-- `NODE_ENV` = `production`
-- `DB_TYPE` = `postgres`
+# 链接项目
+railway link
 
-### 可选
-- `UPLOADS_PATH` - 上传目录路径（默认：生产环境 `/data/uploads`，开发环境 `backend/uploads`）
-- `CORS_ORIGIN` - CORS允许的源（默认：`*`）
+# 部署
+railway up
+```
 
-## 📚 相关文档
+## 📝 部署后任务
 
-- `RAILWAY_VOLUME_SETUP.md` - Railway Volume详细配置指南
-- `DEPLOY.md` - 完整部署指南
-- `RAILWAY_SETUP.md` - Railway数据库配置指南
+1. **监控性能**
+   - 使用 Railway 的 Metrics 面板监控应用性能
+   - 查看错误日志
 
+2. **用户反馈**
+   - 收集用户对性能改善的反馈
+   - 监控实际使用中的性能指标
+
+3. **持续优化**
+   - 根据实际使用情况进一步优化
+   - 考虑添加更多缓存策略
+   - 监控数据库查询性能
+
+## ✅ 部署完成确认
+
+- [ ] 应用可以正常访问
+- [ ] 所有功能正常工作
+- [ ] 性能指标符合预期
+- [ ] 没有控制台错误
+- [ ] 数据库操作正常
+
+---
+
+**部署成功后，记得测试所有功能，确保性能优化没有破坏任何功能！**

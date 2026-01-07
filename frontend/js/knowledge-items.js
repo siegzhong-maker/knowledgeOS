@@ -504,7 +504,7 @@ export function renderKnowledgeView() {
       }
     });
   } else {
-    // 网格视图（默认）
+    // 网格视图（默认）- 使用 DocumentFragment 优化 DOM 操作
     const highlightIds = Array.isArray(knowledgeState.highlightIds) ? knowledgeState.highlightIds : [];
     let latestItems = [];
     let otherItems = [...knowledgeState.filteredItems];
@@ -522,6 +522,9 @@ export function renderKnowledgeView() {
         return orderA - orderB;
       });
     }
+
+    // 使用 DocumentFragment 批量操作 DOM
+    const fragment = document.createDocumentFragment();
 
     // 顶部「本次新提取」区域
     if (latestItems.length > 0) {
@@ -554,14 +557,16 @@ export function renderKnowledgeView() {
       const latestGrid = document.createElement('div');
       latestGrid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4';
 
+      // 使用 DocumentFragment 批量添加卡片
+      const latestFragment = document.createDocumentFragment();
       latestItems.forEach(item => {
-        // 本次新提取区域内，使用与普通列表相同的知识卡片样式
         const card = createKnowledgeCard(item);
-        latestGrid.appendChild(card);
+        latestFragment.appendChild(card);
       });
+      latestGrid.appendChild(latestFragment);
 
       latestSection.appendChild(latestGrid);
-      container.appendChild(latestSection);
+      fragment.appendChild(latestSection);
 
       // 添加分隔线
       const divider = document.createElement('div');
@@ -571,14 +576,9 @@ export function renderKnowledgeView() {
         <span class="text-xs text-slate-400 font-medium">全部知识</span>
         <div class="flex-1 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent"></div>
       `;
-      container.appendChild(divider);
+      fragment.appendChild(divider);
 
-      // 初始化最新提取区域的图标
-      if (window.lucide) {
-        window.lucide.createIcons(latestSection);
-      }
-
-      // 绑定清除高亮按钮
+      // 绑定清除高亮按钮（在添加到 DOM 之前）
       const clearBtn = latestSection.querySelector('#btn-clear-latest-highlight');
       if (clearBtn) {
         clearBtn.addEventListener('click', () => {
@@ -599,31 +599,41 @@ export function renderKnowledgeView() {
     const grid = document.createElement('div');
     grid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-20';
     
+    // 使用 DocumentFragment 批量添加卡片
+    const gridFragment = document.createDocumentFragment();
     (otherItems.length > 0 ? otherItems : knowledgeState.filteredItems).forEach(item => {
       const card = createKnowledgeCard(item);
-      grid.appendChild(card);
+      gridFragment.appendChild(card);
     });
+    grid.appendChild(gridFragment);
+    fragment.appendChild(grid);
 
-    container.appendChild(grid);
+    // 一次性添加到 DOM
+    container.appendChild(fragment);
+
+    // 批量初始化图标（只初始化一次，避免重复）
+    if (window.lucide) {
+      window.lucide.createIcons(container);
+    }
   }
 
-  // 绑定"去文档库"按钮事件
-  const goToRepoBtn = container.querySelector('#btn-go-to-repository');
-  if (goToRepoBtn) {
-    goToRepoBtn.addEventListener('click', () => {
-      if (window.switchView) {
-        window.switchView('repository');
-      } else {
-        console.error('switchView函数未定义');
-      }
-    });
-  }
+    // 绑定"去文档库"按钮事件
+    const goToRepoBtn = container.querySelector('#btn-go-to-repository');
+    if (goToRepoBtn) {
+      goToRepoBtn.addEventListener('click', () => {
+        if (window.switchView) {
+          window.switchView('repository');
+        } else {
+          console.error('switchView函数未定义');
+        }
+      });
+    }
 
-  // 初始化Lucide图标
-  if (window.lucide) {
-    window.lucide.createIcons();
+    // 批量初始化图标（只初始化一次，避免重复）
+    if (window.lucide) {
+      window.lucide.createIcons(container);
+    }
   }
-}
 
 /**
  * 处理筛选变化

@@ -1,6 +1,7 @@
 // 知识图谱组件（星空风格力导向图）
 import { knowledgeAPI } from './api.js';
 import { openKnowledgeDetail } from './knowledge-detail.js';
+import { loadD3 } from './utils.js';
 
 let svg = null;
 let simulation = null;
@@ -65,6 +66,24 @@ export async function initKnowledgeGraph(containerId) {
   `;
   if (window.lucide) {
     window.lucide.createIcons();
+  }
+
+  // 动态加载 D3.js
+  let d3;
+  try {
+    d3 = await loadD3();
+  } catch (error) {
+    console.error('D3.js 加载失败:', error);
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center h-full text-red-400">
+        <i data-lucide="alert-circle" size="32" class="mb-3"></i>
+        <p>D3.js 加载失败: ${error.message}</p>
+      </div>
+    `;
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+    return;
   }
 
   // 获取容器尺寸
