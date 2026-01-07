@@ -1852,10 +1852,30 @@
     };
   </script>
   <script type="module">
-    // 初始化Lucide图标
-    if (typeof lucide !== 'undefined') {
-      lucide.createIcons();
+    // 初始化Lucide图标（带重试机制）
+    async function initLucideIcons() {
+      // 等待 Lucide 加载完成（最多等待 3 秒）
+      let attempts = 0;
+      const maxAttempts = 60; // 60 * 50ms = 3秒
+      
+      const checkLucide = setInterval(() => {
+        attempts++;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+          clearInterval(checkLucide);
+          try {
+            lucide.createIcons();
+            console.log('Lucide 图标初始化完成（HTML script）');
+          } catch (e) {
+            console.warn('Lucide 图标初始化失败:', e);
+          }
+        } else if (attempts >= maxAttempts) {
+          clearInterval(checkLucide);
+          console.warn('Lucide 加载超时，将在后续重试');
+        }
+      }, 50);
     }
+    
+    initLucideIcons();
     
     // 更新Context标签
     async function updateContextLabel() {

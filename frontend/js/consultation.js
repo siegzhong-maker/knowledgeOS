@@ -109,7 +109,8 @@ const state = {
   baseMessages: [], // 分支点之前的消息（所有分支共享）
   branches: [], // 分支列表 [{ branchId, version, branchPoint, messages, docIds, knowledgeBaseIds, createdAt }]
   currentBranchId: null, // 当前显示的分支ID
-  currentStep: null // 当前对话已显示的步骤（用于去重步骤标签）
+  currentStep: null, // 当前对话已显示的步骤（用于去重步骤标签）
+  loadingDocId: null // 当前正在加载的文档ID（用于显示加载状态）
 };
 
 // 标记智能问答是否已完成首次初始化（用于控制视图级 Loading）
@@ -309,6 +310,13 @@ export async function loadPDFList() {
 
 // 初始化：加载PDF列表并分析文档
 export async function initConsultation() {
+  // 检查当前视图是否为 consultation，如果不是则不初始化（避免覆盖其他视图）
+  const consultationView = document.getElementById('view-consultation');
+  if (consultationView && consultationView.classList.contains('hidden')) {
+    console.log('当前视图不是 consultation，跳过初始化');
+    return;
+  }
+  
   // 初始化左侧边栏宽度
   initLeftSidebarWidth();
   const overlay = document.getElementById('consultation-loading-overlay');
@@ -990,12 +998,20 @@ export async function renderPDFList() {
       docElement.className = 'w-full group/item relative';
       docElement.setAttribute('data-doc-wrapper', doc.id);
       docElement.setAttribute('data-doc-id', doc.id);
+      const isLoading = state.loadingDocId === doc.id;
+      const loadingClass = isLoading ? 'opacity-50 cursor-wait' : '';
+      const loadingIndicator = isLoading ? `
+        <div class="absolute right-2 top-1/2 transform -translate-y-1/2" id="loading-indicator-${doc.id}">
+          <div class="animate-spin rounded-full h-3 w-3 border-2 border-indigo-200 border-t-indigo-600"></div>
+        </div>
+      ` : '';
       docElement.innerHTML = `
       <button 
         data-doc-id="${doc.id}"
-        class="w-full flex items-center gap-2 px-2 py-1.5 text-slate-600 hover:bg-slate-50 rounded transition-colors text-xs relative ${state.currentDocId === doc.id ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}"
+        class="w-full flex items-center gap-2 px-2 py-1.5 text-slate-600 hover:bg-slate-50 rounded transition-colors text-xs relative ${state.currentDocId === doc.id ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''} ${loadingClass}"
         oncontextmenu="event.preventDefault(); showDocContextMenu(event, '${doc.id}')"
         title="${title}"
+        ${isLoading ? 'disabled' : ''}
       >
         <i data-lucide="${iconType}" 
            size="14" 
@@ -1012,6 +1028,7 @@ export async function renderPDFList() {
             >${conversationCount}</span>` : ''}
           </div>
         </div>
+        ${loadingIndicator}
       </button>
       ${conversationCount > 0 ? `
         <div class="mt-1 ${isExpanded ? '' : 'hidden'}" data-doc-conversations="${doc.id}">
@@ -1050,11 +1067,21 @@ export async function renderPDFList() {
           console.log('点击元素:', e.target);
           console.log('开始加载文档...');
           
+          // 立即设置加载状态，禁用按钮并显示加载指示器
+          setDocumentLoading(docId, true);
+          
           // 确保loadDoc被调用
-          loadDoc(docId, true).catch(error => {
-            console.error('加载文档失败:', error);
-            alert('加载文档失败: ' + (error.message || '未知错误'));
-          });
+          loadDoc(docId, true)
+            .then(() => {
+              // 加载成功，清除加载状态
+              setDocumentLoading(docId, false);
+            })
+            .catch(error => {
+              // 加载失败，清除加载状态并显示错误
+              setDocumentLoading(docId, false);
+              console.error('加载文档失败:', error);
+              alert('加载文档失败: ' + (error.message || '未知错误'));
+            });
         });
       });
       
@@ -1064,6 +1091,50 @@ export async function renderPDFList() {
   
   // 开始分批渲染
   requestAnimationFrame(renderBatch);
+}
+
+// 设置文档加载状态（用于显示加载指示器和禁用按钮）
+function setDocumentLoading(docId, isLoading) {
+  if (isLoading) {
+    state.loadingDocId = docId;
+  } else {
+    state.loadingDocId = null;
+  }
+  
+  // 更新文档卡片的加载状态
+  const docWrapper = document.querySelector(`[data-doc-wrapper="${docId}"]`);
+  if (docWrapper) {
+    const docButton = docWrapper.querySelector(`[data-doc-id="${docId}"]`);
+    if (docButton) {
+      if (isLoading) {
+        // 添加加载状态类
+        docButton.classList.add('opacity-50', 'cursor-wait');
+        docButton.disabled = true;
+        
+        // 添加加载指示器
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.className = 'absolute right-2 top-1/2 transform -translate-y-1/2';
+        loadingIndicator.id = `loading-indicator-${docId}`;
+        loadingIndicator.innerHTML = `
+          <div class="animate-spin rounded-full h-3 w-3 border-2 border-indigo-200 border-t-indigo-600"></div>
+        `;
+        docButton.style.position = 'relative';
+        if (!docButton.querySelector(`#loading-indicator-${docId}`)) {
+          docButton.appendChild(loadingIndicator);
+        }
+      } else {
+        // 移除加载状态类
+        docButton.classList.remove('opacity-50', 'cursor-wait');
+        docButton.disabled = false;
+        
+        // 移除加载指示器
+        const loadingIndicator = docButton.querySelector(`#loading-indicator-${docId}`);
+        if (loadingIndicator) {
+          loadingIndicator.remove();
+        }
+      }
+    }
+  }
 }
 
 // 切换文档对话列表的展开/折叠（全局函数）
@@ -1153,8 +1224,15 @@ window.continueConversation = async function(conversationId) {
 
 // 为文档开始新对话
 window.startNewConversationForDoc = async function(docId) {
-  await loadDoc(docId, false);
-  await createNewConversation(true); // 保留文档状态，因为用户明确选择了文档
+  // 设置加载状态
+  setDocumentLoading(docId, true);
+  try {
+    await loadDoc(docId, false);
+    await createNewConversation(true); // 保留文档状态，因为用户明确选择了文档
+  } finally {
+    // 清除加载状态
+    setDocumentLoading(docId, false);
+  }
 };
 
 // 启动对话（根据用户问题自动匹配文档）
@@ -1214,8 +1292,15 @@ export async function startConversation(question = null) {
 
 // 直接选择文档开始对话
 export async function startWithDocument(docId) {
-  await loadDoc(docId, false);
-  await startConversation();
+  // 设置加载状态（如果文档在列表中）
+  setDocumentLoading(docId, true);
+  try {
+    await loadDoc(docId, false);
+    await startConversation();
+  } finally {
+    // 清除加载状态
+    setDocumentLoading(docId, false);
+  }
 }
 
 // 更新模式显示（基于当前文档信息）
@@ -1568,11 +1653,22 @@ export async function loadDoc(docId, autoOpenPanel = false) {
     }
     
     console.log('loadDoc 完成');
+    
+    // 清除加载状态（如果设置了）
+    if (state.loadingDocId === docId) {
+      setDocumentLoading(docId, false);
+    }
   } catch (error) {
     if (timer && perfMonitor) {
       perfMonitor.end(timer, { success: false, error: error.message });
     }
     console.error('加载PDF失败:', error);
+    
+    // 清除加载状态（如果设置了）
+    if (state.loadingDocId === docId) {
+      setDocumentLoading(docId, false);
+    }
+    
     alert('加载PDF失败: ' + error.message);
   }
 }
@@ -4681,6 +4777,7 @@ export async function deleteConversation(indexOrId) {
     await renderConversationHistory();
   }
 }
+
 
 // 移除重复的步骤标签（仅当与上一次回答的步骤相同时才移除）
 function removeDuplicateStepLabel(text, isNewMessage = false) {

@@ -291,6 +291,19 @@ function switchView(view) {
       btn.classList.remove('text-slate-300');
     }
   });
+  
+  // 确保侧边栏图标已初始化（特别是知识库的 Lucide 图标）
+  if (typeof lucide !== 'undefined' && lucide.createIcons) {
+    try {
+      // 初始化侧边栏中的图标
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar) {
+        lucide.createIcons(sidebar);
+      }
+    } catch (e) {
+      console.warn('视图切换时初始化侧边栏图标失败:', e);
+    }
+  }
 }
 
 // 暴露switchView到全局作用域（供HTML内联事件使用）
@@ -3272,18 +3285,65 @@ function bindEvents() {
   }
 }
 
+// 等待 Lucide 加载完成的辅助函数
+async function waitForLucide(maxWait = 3000) {
+  if (window.lucide) {
+    return window.lucide;
+  }
+  
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const checkInterval = setInterval(() => {
+      if (window.lucide) {
+        clearInterval(checkInterval);
+        resolve(window.lucide);
+      } else if (Date.now() - startTime > maxWait) {
+        clearInterval(checkInterval);
+        reject(new Error('Lucide 加载超时'));
+      }
+    }, 50);
+  });
+}
+
+// 初始化图标的辅助函数（带重试机制）
+async function initIconsWithRetry() {
+  try {
+    // 等待 Lucide 加载完成
+    await waitForLucide(3000);
+    
+    if (window.lucide) {
+      window.lucide.createIcons();
+      console.log('图标初始化完成');
+    }
+  } catch (e) {
+    console.warn('等待 Lucide 加载失败，尝试直接初始化:', e);
+    // 如果等待失败，尝试直接初始化（可能 Lucide 已经加载但检测失败）
+    if (window.lucide) {
+      try {
+        window.lucide.createIcons();
+        console.log('图标初始化完成（直接初始化）');
+      } catch (initError) {
+        console.warn('直接初始化图标也失败:', initError);
+      }
+    } else {
+      // 如果 Lucide 确实没加载，延迟重试
+      setTimeout(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+          console.log('图标初始化完成（延迟重试）');
+        }
+      }, 500);
+    }
+  }
+}
+
 async function init() {
   try {
     console.log('开始初始化应用...');
     
     // 0. 初始化全局图标（包括左侧导航等静态区域）
-    if (window.lucide) {
-      try {
-        window.lucide.createIcons();
-      } catch (e) {
-        console.warn('初始化图标失败:', e);
-      }
-    }
+    // 使用异步等待，确保 Lucide 加载完成
+    initIconsWithRetry();
     
     // 1. 立即显示页面框架（不等待任何数据）
     bindEvents();
