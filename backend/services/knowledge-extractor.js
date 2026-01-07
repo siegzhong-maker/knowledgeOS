@@ -363,7 +363,16 @@ async function calculateSimilarity(item1, item2, userApiKey = null) {
     ? 100
     : 0;
 
-  // 语义相似度（权重70%）
+  // 快速路径：如果标签和分类相似度已经很高，跳过 AI 调用
+  const fastScore = tagSimilarity * 0.2 + categorySimilarity * 0.1;
+  if (fastScore >= 70) {
+    // 如果快速评分已经达到70以上，直接返回，不调用 AI（更激进的优化）
+    // 加上一些语义相似度估计（基于标签和分类的相似度）
+    const estimatedSemantic = Math.min(100, fastScore * 1.2);
+    return Math.round(estimatedSemantic * 0.7 + tagSimilarity * 0.2 + categorySimilarity * 0.1);
+  }
+
+  // 语义相似度（权重70%）- 只在必要时调用 AI
   let semanticSimilarity = 0;
   try {
     const content1 = `${item1.title} ${item1.content}`.substring(0, 2000);
@@ -438,12 +447,12 @@ async function getRelatedKnowledge(knowledgeItemId, limit = 5, minSimilarity = 6
     return [];
   }
 
-  // 获取同一知识库中的其他知识点
+  // 获取同一知识库中的其他知识点（限制数量以提高性能，从10减少到5）
   const otherItems = await db.all(
     `SELECT * FROM personal_knowledge_items 
      WHERE id != ? AND knowledge_base_id = ? AND status = 'confirmed'
      ORDER BY created_at DESC
-     LIMIT 20`,
+     LIMIT 5`,
     [knowledgeItemId, currentItem.knowledge_base_id]
   );
 
@@ -451,21 +460,22 @@ async function getRelatedKnowledge(knowledgeItemId, limit = 5, minSimilarity = 6
     return [];
   }
 
-  // 计算相似度
-  const similarities = [];
-  for (const item of otherItems) {
-    const similarity = await calculateSimilarity(currentItem, item, userApiKey);
-    if (similarity >= minSimilarity) {
-      similarities.push({
-        item,
-        similarity
-      });
-    }
-  }
-
-  // 按相似度排序并返回Top N
-  similarities.sort((a, b) => b.similarity - a.similarity);
+  // 并行计算相似度（而不是串行，大幅提升性能）
+  const similarityPromises = otherItems.map(item => 
+    calculateSimilarity(currentItem, item, userApiKey)
+      .then(similarity => ({ item, similarity }))
+      .catch(error => {
+        console.warn(`计算相似度失败 (${item.id}):`, error.message);
+        return { item, similarity: 0 };
+      })
+  );
   
+  const results = await Promise.all(similarityPromises);
+  const similarities = results
+    .filter(({ similarity }) => similarity >= minSimilarity)
+    .sort((a, b) => b.similarity - a.similarity);
+  
+  // 按相似度排序并返回Top N
   return similarities.slice(0, limit).map(({ item, similarity }) => ({
     id: item.id,
     title: item.title,

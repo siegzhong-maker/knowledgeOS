@@ -40,6 +40,9 @@ function updateState(updates) {
  * 加载知识列表
  */
 export async function loadKnowledgeItems(filters = {}) {
+  const perfMonitor = window.performanceMonitor;
+  const timer = perfMonitor ? perfMonitor.start('load-knowledge-items', filters) : null;
+  
   try {
     knowledgeState.loading = true;
     renderKnowledgeView(); // 显示加载状态
@@ -55,7 +58,7 @@ export async function loadKnowledgeItems(filters = {}) {
 
     const params = {
       page: knowledgeState.currentPage,
-      limit: 50,
+      limit: 20, // 减少初始加载量，从 50 改为 20
       ...filters
     };
 
@@ -120,7 +123,14 @@ export async function loadKnowledgeItems(filters = {}) {
 
     applyFilters();
     renderKnowledgeView();
+    
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: true, itemCount: data?.length || 0 });
+    }
   } catch (error) {
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: false, error: error.message });
+    }
     console.error('加载知识列表失败:', error);
     knowledgeState.loading = false;
     renderKnowledgeView();
@@ -347,10 +357,8 @@ function createKnowledgeCard(item) {
     openKnowledgeDetail(item.id);
   });
 
-  // 初始化卡片内的 Lucide 图标
-  if (window.lucide) {
-    window.lucide.createIcons(card);
-  }
+  // 不在这里初始化图标，统一在渲染完成后批量初始化
+  // 这样可以提高性能，避免每个卡片都单独初始化
 
   return card;
 }
@@ -477,6 +485,10 @@ export function renderKnowledgeView() {
     if (window.lucide) {
       window.lucide.createIcons();
     }
+    // 空状态渲染完成
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: true, viewMode: 'empty' });
+    }
     return;
   }
 
@@ -503,6 +515,10 @@ export function renderKnowledgeView() {
         });
       }
     });
+    
+    // 时间线视图渲染完成
+    endTimer({ success: true, viewMode: 'timeline', itemCount: knowledgeState.filteredItems.length });
+    return;
   } else {
     // 网格视图（默认）- 使用 DocumentFragment 优化 DOM 操作
     const highlightIds = Array.isArray(knowledgeState.highlightIds) ? knowledgeState.highlightIds : [];
@@ -557,13 +573,29 @@ export function renderKnowledgeView() {
       const latestGrid = document.createElement('div');
       latestGrid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4';
 
-      // 使用 DocumentFragment 批量添加卡片
-      const latestFragment = document.createDocumentFragment();
-      latestItems.forEach(item => {
-        const card = createKnowledgeCard(item);
-        latestFragment.appendChild(card);
-      });
-      latestGrid.appendChild(latestFragment);
+      // 分批渲染卡片（每次 10 个，避免阻塞 UI）
+      const BATCH_SIZE = 10;
+      let latestIndex = 0;
+      
+      const renderLatestBatch = () => {
+        const batch = latestItems.slice(latestIndex, latestIndex + BATCH_SIZE);
+        const batchFragment = document.createDocumentFragment();
+        
+        batch.forEach(item => {
+          const card = createKnowledgeCard(item);
+          batchFragment.appendChild(card);
+        });
+        
+        latestGrid.appendChild(batchFragment);
+        latestIndex += BATCH_SIZE;
+        
+        if (latestIndex < latestItems.length) {
+          requestAnimationFrame(renderLatestBatch);
+        }
+      };
+      
+      // 开始渲染
+      renderLatestBatch();
 
       latestSection.appendChild(latestGrid);
       fragment.appendChild(latestSection);
@@ -598,23 +630,46 @@ export function renderKnowledgeView() {
     // 下面是常规知识列表
     const grid = document.createElement('div');
     grid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-20';
-    
-    // 使用 DocumentFragment 批量添加卡片
-    const gridFragment = document.createDocumentFragment();
-    (otherItems.length > 0 ? otherItems : knowledgeState.filteredItems).forEach(item => {
-      const card = createKnowledgeCard(item);
-      gridFragment.appendChild(card);
-    });
-    grid.appendChild(gridFragment);
     fragment.appendChild(grid);
-
-    // 一次性添加到 DOM
+    
+    // 一次性添加到 DOM（先添加容器，再分批填充内容）
     container.appendChild(fragment);
 
-    // 批量初始化图标（只初始化一次，避免重复）
-    if (window.lucide) {
-      window.lucide.createIcons(container);
-    }
+    // 分批渲染常规知识列表卡片（每次 10 个）
+    const allItemsToRender = otherItems.length > 0 ? otherItems : knowledgeState.filteredItems;
+    const BATCH_SIZE = 10;
+    let gridIndex = 0;
+    
+    const renderGridBatch = () => {
+      const batch = allItemsToRender.slice(gridIndex, gridIndex + BATCH_SIZE);
+      
+      batch.forEach(item => {
+        const card = createKnowledgeCard(item);
+        grid.appendChild(card);
+      });
+      
+      gridIndex += BATCH_SIZE;
+      
+      if (gridIndex < allItemsToRender.length) {
+        requestAnimationFrame(renderGridBatch);
+      } else {
+        // 所有卡片渲染完成后，批量初始化所有图标
+        if (window.lucide) {
+          window.lucide.createIcons(container);
+        }
+        // 渲染完成后结束性能计时
+        setTimeout(() => {
+          endTimer({ 
+            success: true, 
+            itemCount: allItemsToRender.length,
+            viewMode: 'grid'
+          });
+        }, 100);
+      }
+    };
+    
+    // 开始渲染
+    requestAnimationFrame(renderGridBatch);
   }
 
     // 绑定"去文档库"按钮事件

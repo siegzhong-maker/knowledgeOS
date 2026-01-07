@@ -251,6 +251,11 @@ db.serialize(() => {
     if (err) console.error('创建索引失败:', err.message);
   });
 
+  // settings 表索引（优化查询性能）
+  db.run(`CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key)`, (err) => {
+    if (err) console.error('创建索引失败:', err.message);
+  });
+
   // 插入预设子分类数据
   const { v4: uuidv4 } = require('uuid');
   const presetSubcategories = [

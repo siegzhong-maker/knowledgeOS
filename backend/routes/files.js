@@ -162,21 +162,43 @@ router.get('/pdf/:id', async (req, res) => {
       });
     }
     
-    // 设置响应头
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${path.basename(resolvedFilePath)}"`);
-    
-    // 支持Range请求（用于断点续传和流式加载）
+    // 获取文件统计信息
     const stat = await fs.stat(resolvedFilePath);
     const fileSize = stat.size;
     const range = req.headers.range;
+    
+    // 添加 HTTP 缓存头（减少重复请求）
+    const etag = `"${id}-${stat.mtime.getTime()}-${fileSize}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1小时缓存
+    res.setHeader('Last-Modified', stat.mtime.toUTCString());
+    
+    // 检查条件请求（If-None-Match）
+    if (req.headers['if-none-match'] === etag) {
+      console.log('PDF文件未修改，返回304:', id);
+      return res.status(304).end();
+    }
+    
+    // 检查条件请求（If-Modified-Since）
+    if (req.headers['if-modified-since']) {
+      const ifModifiedSince = new Date(req.headers['if-modified-since']);
+      if (stat.mtime <= ifModifiedSince) {
+        console.log('PDF文件未修改（基于时间），返回304:', id);
+        return res.status(304).end();
+      }
+    }
+    
+    // 设置响应头
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(resolvedFilePath)}"`);
     
     console.log('返回PDF文件:', {
       id,
       filePath: resolvedFilePath,
       foundVia: foundPath?.reason,
       fileSize,
-      hasRange: !!range
+      hasRange: !!range,
+      etag
     });
     
     if (range) {

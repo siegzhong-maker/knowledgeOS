@@ -1,5 +1,9 @@
 import { pdfAPI } from './api.js';
 
+// PDF 内容缓存（避免重复请求）
+const pdfContentCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+
 /**
  * 上传PDF文件
  * @param {File} file - PDF文件
@@ -23,11 +27,23 @@ export async function uploadPDF(file, moduleId = null, knowledgeBaseId = null) {
 }
 
 /**
- * 获取PDF内容
+ * 获取PDF内容（带缓存）
  * @param {string} id - PDF文档ID
  * @returns {Promise<Object>}
  */
 export async function getPDFContent(id) {
+  // 检查缓存
+  if (pdfContentCache.has(id)) {
+    const cached = pdfContentCache.get(id);
+    if (Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log('从缓存获取PDF内容:', id);
+      return cached.data;
+    } else {
+      // 缓存过期，删除
+      pdfContentCache.delete(id);
+    }
+  }
+  
   try {
     const response = await pdfAPI.getContent(id);
     console.log('getPDFContent响应:', response);
@@ -77,10 +93,37 @@ export async function getPDFContent(id) {
     }
     
     console.log('处理后的PDF数据:', pdfData);
+    
+    // 缓存结果
+    if (pdfData) {
+      pdfContentCache.set(id, {
+        data: pdfData,
+        timestamp: Date.now()
+      });
+      
+      // 限制缓存大小（最多保存 50 个）
+      if (pdfContentCache.size > 50) {
+        const firstKey = pdfContentCache.keys().next().value;
+        pdfContentCache.delete(firstKey);
+      }
+    }
+    
     return pdfData;
   } catch (error) {
     console.error('getPDFContent错误:', error);
     throw new Error(error.message || '获取PDF内容失败');
+  }
+}
+
+/**
+ * 清除PDF缓存
+ * @param {string} id - PDF文档ID（可选，不提供则清除所有）
+ */
+export function clearPDFCache(id = null) {
+  if (id) {
+    pdfContentCache.delete(id);
+  } else {
+    pdfContentCache.clear();
   }
 }
 

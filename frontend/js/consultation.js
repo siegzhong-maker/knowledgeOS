@@ -120,8 +120,12 @@ export async function loadPDFList() {
     const kbModule = await import('./knowledge-bases.js');
     const currentKbId = kbModule.getCurrentKnowledgeBaseId();
     
-    // 构建查询参数
-    const queryParams = { type: 'pdf' };
+    // 构建查询参数 - 减少初始加载量（只加载前 20 个）
+    const queryParams = { 
+      type: 'pdf',
+      limit: 20, // 初始只加载 20 个 PDF
+      page: 1
+    };
     if (currentKbId) {
       queryParams.knowledge_base_id = currentKbId;
     }
@@ -133,17 +137,25 @@ export async function loadPDFList() {
       state.pdfList = response.data || [];
       console.log(`加载到 ${state.pdfList.length} 个PDF文档:`, state.pdfList.map(d => d.title));
       
-      // 渲染PDF列表
+      // 渲染PDF列表（先显示，不等待分析）
       renderPDFList();
       
-      // 异步分析所有文档（不阻塞UI），分析完成后更新显示
+      // 延迟文档分析（按需分析，不自动分析所有文档）
+      // 只在用户需要时分析（点击文档或展开时）
+      // 或者延迟到后台空闲时分析前几个文档
       if (state.pdfList.length > 0) {
-        analyzeAllDocuments().then(() => {
-          // 分析完成后重新渲染，显示分类信息
-          console.log('文档分析完成，更新显示');
-          renderPDFList();
-          renderWelcomeDocs();
-        });
+        // 延迟分析，不阻塞初始渲染
+        setTimeout(() => {
+          // 只分析前 4 个文档（用于欢迎页面显示）
+          const docsToAnalyze = state.pdfList.slice(0, 4);
+          analyzeDocumentsOnDemand(docsToAnalyze.map(d => d.id)).then(() => {
+            console.log('前 4 个文档分析完成，更新显示');
+            renderPDFList();
+            renderWelcomeDocs();
+          }).catch(err => {
+            console.warn('文档分析失败（非关键）:', err);
+          });
+        }, 1000); // 延迟 1 秒，确保页面先渲染
       }
     } else {
       console.warn('PDF列表API返回失败:', response);
@@ -542,15 +554,25 @@ function renderWelcomeDocs() {
   }
 }
 
-// 分析所有文档（后台进行）
-async function analyzeAllDocuments() {
-  for (const doc of state.pdfList) {
+// 按需分析文档（只分析指定的文档ID列表）
+async function analyzeDocumentsOnDemand(docIds) {
+  const docsToAnalyze = state.pdfList.filter(doc => docIds.includes(doc.id));
+  
+  for (const doc of docsToAnalyze) {
     try {
       // 检查是否已有元数据
+      if (state.docMetadata[doc.id]) {
+        continue; // 已有元数据，跳过分析
+      }
+      
       if (doc.metadata) {
         try {
-          state.docMetadata[doc.id] = JSON.parse(doc.metadata);
-          continue; // 已有元数据，跳过
+          const parsed = JSON.parse(doc.metadata);
+          if (parsed && parsed.category) {
+            state.docMetadata[doc.id] = parsed;
+            continue; // 已有元数据，跳过分析
+          }
+          // 解析失败，继续分析
         } catch (e) {
           // 解析失败，继续分析
         }
@@ -564,6 +586,53 @@ async function analyzeAllDocuments() {
     } catch (error) {
       console.warn(`分析文档 ${doc.id} 失败:`, error);
     }
+  }
+}
+
+// 分析所有文档（后台进行）- 保留用于兼容性，但不推荐使用
+async function analyzeAllDocuments() {
+  const allDocIds = state.pdfList.map(doc => doc.id);
+  return analyzeDocumentsOnDemand(allDocIds);
+}
+
+// 批量获取所有文档的对话数量（修复 N+1 查询问题）
+async function getConversationsCountForAllDocs(docIds) {
+  try {
+    // 一次性获取所有对话
+    const allConversations = await getAllConversations();
+    
+    // 按文档ID分组统计
+    const counts = {};
+    const conversationsByDoc = {};
+    
+    docIds.forEach(id => {
+      counts[id] = 0;
+      conversationsByDoc[id] = [];
+    });
+    
+    allConversations.forEach(conv => {
+      if (conv.docId && counts.hasOwnProperty(conv.docId)) {
+        counts[conv.docId]++;
+        conversationsByDoc[conv.docId].push(conv);
+      }
+    });
+    
+    // 对每个文档的对话列表按时间排序
+    Object.keys(conversationsByDoc).forEach(docId => {
+      conversationsByDoc[docId].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    });
+    
+    return { counts, conversationsByDoc };
+  } catch (error) {
+    console.error('批量获取对话数量失败:', error);
+    // 返回空对象，避免阻塞渲染
+    const emptyCounts = {};
+    const emptyConvs = {};
+    docIds.forEach(id => {
+      emptyCounts[id] = 0;
+      emptyConvs[id] = [];
+    });
+    return { counts: emptyCounts, conversationsByDoc: emptyConvs };
   }
 }
 
@@ -588,40 +657,54 @@ export async function renderPDFList() {
   
   console.log('渲染PDF列表，文档数量:', state.pdfList.length);
   
-  // 为每个文档获取对话数量
-  const docsWithConversations = await Promise.all(
-    state.pdfList.map(async (doc) => {
-      const conversations = await getConversationsByDocId(doc.id);
-      return { 
-        ...doc, 
-        conversationCount: conversations.length, 
-        conversations
-      };
-    })
-  );
+  // 批量获取所有文档的对话数量（修复 N+1 查询）
+  const docIds = state.pdfList.map(doc => doc.id);
+  const { counts, conversationsByDoc } = await getConversationsCountForAllDocs(docIds);
   
-  container.innerHTML = docsWithConversations.map(doc => {
-    const title = escapeHtml(doc.title || '未命名文档');
-    const metadata = state.docMetadata[doc.id] || {};
-    const category = metadata.category || '通用';
-    const conversationCount = doc.conversationCount || 0;
-    const isExpanded = state.expandedDocs && state.expandedDocs.has(doc.id);
+  // 为每个文档添加对话信息
+  const docsWithConversations = state.pdfList.map(doc => ({
+    ...doc,
+    conversationCount: counts[doc.id] || 0,
+    conversations: conversationsByDoc[doc.id] || []
+  }));
+  
+  // 分批渲染文档列表（每次 15 个，避免阻塞 UI）
+  const BATCH_SIZE = 15;
+  let currentIndex = 0;
+  
+  // 先清空容器
+  container.innerHTML = '';
+  
+  const renderBatch = () => {
+    const batch = docsWithConversations.slice(currentIndex, currentIndex + BATCH_SIZE);
     
-    console.log('渲染文档:', { id: doc.id, title, category, hasMetadata: !!state.docMetadata[doc.id], conversationCount });
+    const batchFragment = document.createDocumentFragment();
     
-    // 根据分类选择图标和颜色
-    let iconType = 'file-text';
-    let iconColor = 'indigo';
-    if (category.includes('团队') || category.includes('股权') || category.includes('管理')) {
-      iconType = 'users';
-      iconColor = 'emerald';
-    } else if (category.includes('品牌') || category.includes('营销') || category.includes('推广')) {
-      iconType = 'target';
-      iconColor = 'blue';
-    }
-    
-    return `
-    <div class="w-full group/item relative" data-doc-wrapper="${doc.id}" data-doc-id="${doc.id}">
+    batch.forEach(doc => {
+      const title = escapeHtml(doc.title || '未命名文档');
+      const metadata = state.docMetadata[doc.id] || {};
+      const category = metadata.category || '通用';
+      const conversationCount = doc.conversationCount || 0;
+      const isExpanded = state.expandedDocs && state.expandedDocs.has(doc.id);
+      
+      console.log('渲染文档:', { id: doc.id, title, category, hasMetadata: !!state.docMetadata[doc.id], conversationCount });
+      
+      // 根据分类选择图标和颜色
+      let iconType = 'file-text';
+      let iconColor = 'indigo';
+      if (category.includes('团队') || category.includes('股权') || category.includes('管理')) {
+        iconType = 'users';
+        iconColor = 'emerald';
+      } else if (category.includes('品牌') || category.includes('营销') || category.includes('推广')) {
+        iconType = 'target';
+        iconColor = 'blue';
+      }
+      
+      const docElement = document.createElement('div');
+      docElement.className = 'w-full group/item relative';
+      docElement.setAttribute('data-doc-wrapper', doc.id);
+      docElement.setAttribute('data-doc-id', doc.id);
+      docElement.innerHTML = `
       <button 
         data-doc-id="${doc.id}"
         class="w-full flex items-center gap-2 px-2 py-1.5 text-slate-600 hover:bg-slate-50 rounded transition-colors text-xs relative ${state.currentDocId === doc.id ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}"
@@ -649,42 +732,52 @@ export async function renderPDFList() {
           ${renderDocConversationsList(doc.conversations || [], doc.id)}
         </div>
       ` : ''}
-    </div>
-  `;
-  }).join('');
-  
-  console.log('PDF列表渲染完成，HTML长度:', container.innerHTML.length);
-  
-  // 初始化Lucide图标
-  if (window.lucide) {
-    lucide.createIcons(container);
-  }
-  
-  // 绑定文档点击事件（打开右侧面板）
-  container.querySelectorAll('[data-doc-id]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      // 如果点击的是按钮内的其他按钮，不触发文档加载
-      if (e.target.closest('button[onclick*="toggleDocConversations"]') ||
-          e.target.closest('button[data-doc-toggle]')) {
-        console.log('点击了文档内的子按钮，不触发文档加载');
-        return;
+    `;
+      
+      batchFragment.appendChild(docElement);
+    });
+    
+    container.appendChild(batchFragment);
+    currentIndex += BATCH_SIZE;
+    
+    if (currentIndex < docsWithConversations.length) {
+      requestAnimationFrame(renderBatch);
+    } else {
+      // 所有文档渲染完成后，批量初始化图标和绑定事件
+      if (window.lucide) {
+        lucide.createIcons(container);
       }
       
-      const docId = btn.getAttribute('data-doc-id');
-      console.log('=== 文档卡片被点击 ===');
-      console.log('文档ID:', docId);
-      console.log('点击元素:', e.target);
-      console.log('开始加载文档...');
-      
-      // 确保loadDoc被调用
-      loadDoc(docId, true).catch(error => {
-        console.error('加载文档失败:', error);
-        alert('加载文档失败: ' + (error.message || '未知错误'));
+      // 绑定文档点击事件（打开右侧面板）
+      container.querySelectorAll('[data-doc-id]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          // 如果点击的是按钮内的其他按钮，不触发文档加载
+          if (e.target.closest('button[onclick*="toggleDocConversations"]') ||
+              e.target.closest('button[data-doc-toggle]')) {
+            console.log('点击了文档内的子按钮，不触发文档加载');
+            return;
+          }
+          
+          const docId = btn.getAttribute('data-doc-id');
+          console.log('=== 文档卡片被点击 ===');
+          console.log('文档ID:', docId);
+          console.log('点击元素:', e.target);
+          console.log('开始加载文档...');
+          
+          // 确保loadDoc被调用
+          loadDoc(docId, true).catch(error => {
+            console.error('加载文档失败:', error);
+            alert('加载文档失败: ' + (error.message || '未知错误'));
+          });
+        });
       });
-    });
-  });
+      
+      console.log(`已绑定 ${container.querySelectorAll('[data-doc-id]').length} 个文档的点击事件`);
+    }
+  };
   
-  console.log(`已绑定 ${container.querySelectorAll('[data-doc-id]').length} 个文档的点击事件`);
+  // 开始分批渲染
+  requestAnimationFrame(renderBatch);
 }
 
 // 切换文档对话列表的展开/折叠（全局函数）
@@ -940,17 +1033,49 @@ window.showConversationSwitcher = function() {
 
 // 加载PDF文档
 export async function loadDoc(docId, autoOpenPanel = false) {
+  const perfMonitor = window.performanceMonitor;
+  const timer = perfMonitor ? perfMonitor.start('load-doc', { docId }) : null;
+  
   console.log('=== loadDoc 函数被调用 ===');
   console.log('文档ID:', docId);
   console.log('自动打开面板:', autoOpenPanel);
   
+  // 立即显示加载状态（不等待任何异步操作）
+  const container = document.getElementById('pdf-content');
+  if (container) {
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-20">
+        <div class="relative">
+          <div class="animate-spin rounded-full h-16 w-16 border-4 border-indigo-200 border-t-indigo-600 mb-6"></div>
+          <i data-lucide="file-text" size="24" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-600"></i>
+        </div>
+        <p class="text-sm font-medium text-slate-700 mb-2">正在加载PDF...</p>
+        <p class="text-xs text-slate-400">请稍候</p>
+      </div>
+    `;
+    container.classList.remove('opacity-0');
+    if (window.lucide) {
+      lucide.createIcons(container);
+    }
+  }
+  
   try {
     console.log('开始加载PDF文档:', docId);
-    const pdfData = await getPDFContent(docId);
+    
+    // 并行执行：获取 PDF 内容和元数据（如果已缓存）
+    const pdfPromise = getPDFContent(docId);
+    const metadataPromise = state.docMetadata[docId] 
+      ? Promise.resolve(state.docMetadata[docId])
+      : Promise.resolve(null);
+    
+    const [pdfData, cachedMetadata] = await Promise.all([pdfPromise, metadataPromise]);
     console.log('PDF数据获取成功:', pdfData);
     
     if (!pdfData) {
       console.error('PDF数据为空');
+      if (timer && perfMonitor) {
+        perfMonitor.end(timer, { success: false, error: 'PDF数据为空' });
+      }
       alert('加载PDF内容失败：数据为空');
       return;
     }
@@ -958,52 +1083,52 @@ export async function loadDoc(docId, autoOpenPanel = false) {
     state.currentDocId = docId;
     state.currentDoc = pdfData;
     
-    // 获取或加载文档元数据
-    if (!state.docMetadata[docId]) {
-      try {
-        const result = await consultationAPI.analyzeDocument(docId);
-        if (result.success && result.data) {
-          state.docMetadata[docId] = result.data;
-          state.currentDocInfo = result.data;
+    // 获取或加载文档元数据（优化：先使用默认值，后台异步分析）
+    if (cachedMetadata) {
+      state.currentDocInfo = cachedMetadata;
+    } else if (!state.docMetadata[docId]) {
+      // 先使用默认值，不阻塞显示
+      state.currentDocInfo = {
+        id: docId,
+        title: pdfData.title || '未命名文档',
+        category: '通用',
+        theme: pdfData.title || '未分类',
+        role: '知识助手'
+      };
+      
+      // 后台异步分析（不阻塞，更激进地延迟1秒，只在真正需要时才分析）
+      setTimeout(async () => {
+        // 检查用户是否还在查看这个文档，如果已经切换了就不分析了
+        if (state.currentDocId !== docId) {
+          console.log('用户已切换文档，取消分析:', docId);
+          return;
         }
-      } catch (error) {
-        console.warn('分析文档失败:', error);
-        // 使用默认值
-        state.currentDocInfo = {
-          id: docId,
-          title: pdfData.title || '未命名文档',
-          category: '通用',
-          theme: pdfData.title || '未分类',
-          role: '知识助手'
-        };
-      }
+        
+        try {
+          const result = await consultationAPI.analyzeDocument(docId);
+          if (result.success && result.data) {
+            state.docMetadata[docId] = result.data;
+            // 更新显示（如果当前文档还是这个）
+            if (state.currentDocId === docId) {
+              state.currentDocInfo = result.data;
+              // 更新文档列表显示（如果有分类信息）
+              renderPDFList();
+            }
+          }
+        } catch (error) {
+          console.warn('后台分析文档失败:', error);
+        }
+      }, 1000); // 从 100ms 增加到 1000ms（1秒），更激进地延迟
     } else {
       state.currentDocInfo = state.docMetadata[docId];
     }
     
-    
-    // 渲染到右侧面板
-    const container = document.getElementById('pdf-content');
+    // 立即渲染PDF（不等待元数据分析）
     if (container) {
       console.log('找到pdf-content容器，开始渲染PDF内容');
       console.log('当前文档数据:', state.currentDoc);
       // 清除旧的PDF查看器实例
       state.pdfViewerInstance = null;
-      // 先清空容器并显示加载状态
-      container.innerHTML = `
-        <div class="flex flex-col items-center justify-center py-20">
-          <div class="relative">
-            <div class="animate-spin rounded-full h-16 w-16 border-4 border-indigo-200 border-t-indigo-600 mb-6"></div>
-            <i data-lucide="file-text" size="24" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-600"></i>
-          </div>
-          <p class="text-sm font-medium text-slate-700 mb-2">正在加载PDF...</p>
-          <p class="text-xs text-slate-400">请稍候</p>
-        </div>
-      `;
-      container.classList.remove('opacity-0');
-      if (window.lucide) {
-        lucide.createIcons(container);
-      }
       
       try {
         // renderPDFContent现在是async函数
@@ -1048,7 +1173,11 @@ export async function loadDoc(docId, autoOpenPanel = false) {
       }
     } else {
       console.error('找不到pdf-content容器');
+      if (timer && perfMonitor) {
+        perfMonitor.end(timer, { success: false, error: '容器未找到' });
+      }
       alert('找不到PDF显示容器，请刷新页面重试');
+      return;
     }
     
     // 更新文档标题
@@ -1060,11 +1189,14 @@ export async function loadDoc(docId, autoOpenPanel = false) {
     // 更新输入区域当前文档提示
     updateCurrentDocHint();
     
-    // 重新渲染PDF列表以更新高亮
-    await renderPDFList();
-    
-    // 渲染文档的对话历史
-    await renderDocConversationsInRightPanel(docId);
+    // 延迟非关键操作（不阻塞主流程）
+    setTimeout(async () => {
+      // 重新渲染PDF列表以更新高亮
+      renderPDFList();
+      
+      // 渲染文档的对话历史
+      renderDocConversationsInRightPanel(docId);
+    }, 100);
     
     // 更新聊天状态指示器
     updateChatStatusIndicator();
@@ -1118,7 +1250,16 @@ export async function loadDoc(docId, autoOpenPanel = false) {
       conversationsPanel.classList.add('hidden');
       console.log('已切换到PDF内容标签页');
     }
+    
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: true, docId });
+    }
+    
+    console.log('loadDoc 完成');
   } catch (error) {
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: false, error: error.message });
+    }
     console.error('加载PDF失败:', error);
     alert('加载PDF失败: ' + error.message);
   }

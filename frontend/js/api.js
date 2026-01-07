@@ -74,6 +74,9 @@ async function apiRequest(endpoint, options = {}) {
 
   // 创建请求 Promise
   const requestPromise = (async () => {
+    const perfMonitor = window.performanceMonitor;
+    const timer = perfMonitor ? perfMonitor.start(`api-${method}`, { endpoint }) : null;
+    
     try {
       const response = await fetch(url, config);
       

@@ -496,32 +496,41 @@ export async function initPDFViewer(pdfUrl, container, options = {}) {
     }
 
     // 滚动到指定页面
-    function scrollToPage(pageNum, searchText = null) {
-      const pageElement = document.getElementById(`pdf-page-wrapper-${pageNum}`);
-      if (pageElement) {
-        // 如果有搜索文本，使用文本定位
-        if (searchText) {
-          scrollToText(pageNum, searchText);
+    async function scrollToPage(pageNum, searchText = null) {
+      // 如果有搜索文本，使用文本定位
+      if (searchText) {
+        scrollToText(pageNum, searchText);
+        return;
+      }
+      
+      let pageElement = document.getElementById(`pdf-page-wrapper-${pageNum}`);
+      
+      // 如果页面元素不存在，先渲染该页面
+      if (!pageElement) {
+        console.log(`页面 ${pageNum} 尚未渲染，开始渲染...`);
+        pageElement = await renderPage(pageNum);
+        if (!pageElement) {
+          console.error(`无法渲染页面 ${pageNum}`);
           return;
         }
-        
-        // 移除所有现有的高亮
-        pagesContainer.querySelectorAll('.highlighted-pdf-page').forEach(el => {
-          el.classList.remove('highlighted-pdf-page');
-        });
-        removeTextHighlights();
-        
-        // 滚动到页面（居中显示）
-        pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        
-        // 添加高亮效果
-        pageElement.classList.add('highlighted-pdf-page');
-        
-        // 3秒后移除高亮
-        setTimeout(() => {
-          pageElement.classList.remove('highlighted-pdf-page');
-        }, 3000);
       }
+      
+      // 移除所有现有的高亮
+      pagesContainer.querySelectorAll('.highlighted-pdf-page').forEach(el => {
+        el.classList.remove('highlighted-pdf-page');
+      });
+      removeTextHighlights();
+      
+      // 滚动到页面（居中显示）
+      pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // 添加高亮效果
+      pageElement.classList.add('highlighted-pdf-page');
+      
+      // 3秒后移除高亮
+      setTimeout(() => {
+        pageElement.classList.remove('highlighted-pdf-page');
+      }, 3000);
     }
 
     // 更新页面信息
@@ -543,10 +552,10 @@ export async function initPDFViewer(pdfUrl, container, options = {}) {
     const fitWidthBtn = document.getElementById('pdf-fit-width');
 
     if (prevBtn) {
-      prevBtn.addEventListener('click', () => {
+      prevBtn.addEventListener('click', async () => {
         if (currentPage > 1) {
           currentPage--;
-          scrollToPage(currentPage);
+          await scrollToPage(currentPage);
           updatePageInfo();
           prevBtn.disabled = currentPage === 1;
           nextBtn.disabled = currentPage === numPages;
@@ -555,10 +564,10 @@ export async function initPDFViewer(pdfUrl, container, options = {}) {
     }
 
     if (nextBtn) {
-      nextBtn.addEventListener('click', () => {
+      nextBtn.addEventListener('click', async () => {
         if (currentPage < numPages) {
           currentPage++;
-          scrollToPage(currentPage);
+          await scrollToPage(currentPage);
           updatePageInfo();
           prevBtn.disabled = currentPage === 1;
           nextBtn.disabled = currentPage === numPages;

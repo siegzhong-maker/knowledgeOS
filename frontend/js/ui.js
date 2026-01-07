@@ -325,6 +325,9 @@ function setFilter(filter) {
 
 // 渲染卡片
 function renderCards() {
+  const perfMonitor = window.performanceMonitor;
+  const timer = perfMonitor ? perfMonitor.start('render-cards') : null;
+  
   // 目前所有内容都视为「文本」，不再按照类型区分
   let data = allItems;
   
@@ -535,7 +538,7 @@ function renderRepoList() {
       : '<span class="px-2 inline-flex text-[11px] leading-5 font-semibold rounded-full bg-slate-100 text-slate-600 flex items-center gap-1"><i class="fa-solid fa-circle text-[10px]"></i>未提取</span>';
     
     tempTbody.innerHTML = `
-    <tr class="cursor-pointer" data-id="${item.id}" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+    <tr class="cursor-pointer" data-id="${item.id}">
       <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
@@ -660,7 +663,7 @@ function renderArchiveList() {
   
   data.forEach((item) => {
     tempTbody.innerHTML = `
-    <tr class="cursor-pointer" data-id="${item.id}" onclick="window.openDetailById && window.openDetailById('${item.id}')">
+    <tr class="cursor-pointer" data-id="${item.id}">
       <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
         ${escapeHtml(truncate(item.title || '无标题', 28))}
       </td>
@@ -2031,6 +2034,71 @@ async function refreshItemAfterSummary(itemId) {
 
 // 已删除：快速导入功能（handleQuickInputKeydown）
 
+// 快速加载前 20 条数据（用于初始显示）
+async function loadItemsFast() {
+  const perfMonitor = window.performanceMonitor;
+  const timer = perfMonitor ? perfMonitor.start('load-items-fast') : null;
+  
+  try {
+    // 显示加载状态
+    if (elDashboardSubtitle) {
+      elDashboardSubtitle.textContent = '正在加载...';
+    }
+    
+    // 快速加载前 20 条
+    const pageSize = 20;
+    
+    repoCurrentPage = 1;
+    allItems = [];
+    repoLoadedCount = 0;
+    
+    const res = await itemsAPI.getAll({ type: 'all', page: 1, limit: pageSize });
+    
+    const newItems = res.data || [];
+    allItems = newItems;
+    
+    repoTotalCount = res.total || allItems.length;
+    repoLoadedCount = allItems.length;
+    const hasMore = res.hasMore || (repoLoadedCount < repoTotalCount);
+    
+    console.log(`快速加载了 ${newItems.length} 个项目，已加载 ${repoLoadedCount}/${repoTotalCount}`);
+    
+    scheduleRender(['cards', 'repoList', 'tagsCloud']);
+    
+    // 延迟加载非关键 API（stats），不阻塞主渲染
+    setTimeout(() => {
+      loadDashboardStats().catch(err => {
+        console.warn('统计信息加载失败（非关键）:', err);
+      });
+    }, 500);
+    
+    // 更新加载更多按钮状态
+    updateLoadMoreButton('repo', hasMore);
+    
+    // 如果有更多数据，后台继续加载
+    if (hasMore) {
+      setTimeout(() => {
+        loadItemsFull().catch(err => {
+          console.warn('后台加载完整数据失败:', err);
+        });
+      }, 1000);
+    }
+    
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: true, itemCount: newItems.length });
+    }
+  } catch (error) {
+    if (timer && perfMonitor) {
+      perfMonitor.end(timer, { success: false, error: error.message });
+    }
+    console.error('快速加载内容失败:', error);
+    if (elDashboardSubtitle) {
+      elDashboardSubtitle.textContent = '加载失败，请稍后重试';
+    }
+    showToast(error.message || '加载内容失败', 'error');
+  }
+}
+
 // 加载 items（默认排除archived）
 // 使用分页加载以提高性能
 async function loadItems(reset = true) {
@@ -2077,6 +2145,40 @@ async function loadItems(reset = true) {
       elDashboardSubtitle.textContent = '加载失败，请稍后重试';
     }
     showToast(error.message || '加载内容失败', 'error');
+  }
+}
+
+// 后台加载完整数据（用于补充快速加载的数据）
+async function loadItemsFull() {
+  try {
+    if (repoLoadedCount >= repoTotalCount) {
+      return; // 已经加载完所有数据
+    }
+    
+    repoCurrentPage++;
+    const res = await itemsAPI.getAll({ type: 'all', page: repoCurrentPage, limit: 30 });
+    
+    const newItems = res.data || [];
+    allItems = [...allItems, ...newItems];
+    
+    repoLoadedCount = allItems.length;
+    const hasMore = res.hasMore || (repoLoadedCount < repoTotalCount);
+    
+    console.log(`后台加载了 ${newItems.length} 个项目，总计 ${repoLoadedCount}/${repoTotalCount}`);
+    
+    scheduleRender(['cards', 'repoList', 'tagsCloud']);
+    updateLoadMoreButton('repo', hasMore);
+    
+    // 如果还有更多，继续加载
+    if (hasMore && repoLoadedCount < repoTotalCount) {
+      setTimeout(() => {
+        loadItemsFull().catch(err => {
+          console.warn('继续加载数据失败:', err);
+        });
+      }, 500);
+    }
+  } catch (error) {
+    console.warn('后台加载数据失败（非关键）:', error);
   }
 }
 
@@ -2527,16 +2629,17 @@ function bindEvents() {
   if (elRepoList) {
     elRepoList.addEventListener('click', async (e) => {
       const actionBtn = e.target.closest('[data-action]');
-      if (!actionBtn) return;
       
-      e.stopPropagation();
-      const action = actionBtn.getAttribute('data-action');
-      const id = actionBtn.getAttribute('data-id');
-      const item = allItems.find((it) => it.id === id);
-      
-      if (!item) return;
-      
-      if (action === 'extract') {
+      // 如果点击的是按钮，处理按钮操作
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.getAttribute('data-action');
+        const id = actionBtn.getAttribute('data-id');
+        const item = allItems.find((it) => it.id === id);
+        
+        if (!item) return;
+        
+        if (action === 'extract') {
         // 提取知识
         try {
           // 获取当前知识库ID
@@ -2633,6 +2736,17 @@ function bindEvents() {
           showToast(error.message || '删除失败', 'error');
         }
       }
+      return; // 按钮操作已处理，不再继续
+      }
+      
+      // 如果不是点击按钮，检查是否点击在表格行上
+      const row = e.target.closest('tr[data-id]');
+      if (row) {
+        const id = row.getAttribute('data-id');
+        if (id && window.openDetailById) {
+          await window.openDetailById(id);
+        }
+      }
     });
   }
   
@@ -2640,16 +2754,17 @@ function bindEvents() {
   if (elArchiveList) {
     elArchiveList.addEventListener('click', async (e) => {
       const actionBtn = e.target.closest('[data-action]');
-      if (!actionBtn) return;
       
-      e.stopPropagation();
-      const action = actionBtn.getAttribute('data-action');
-      const id = actionBtn.getAttribute('data-id');
-      const item = archivedItems.find((it) => it.id === id);
-      
-      if (!item) return;
-      
-      if (action === 'view') {
+      // 如果点击的是按钮，处理按钮操作
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.getAttribute('data-action');
+        const id = actionBtn.getAttribute('data-id');
+        const item = archivedItems.find((it) => it.id === id);
+        
+        if (!item) return;
+        
+        if (action === 'view') {
         await openDetail(item);
       } else if (action === 'restore') {
         try {
@@ -2699,6 +2814,17 @@ function bindEvents() {
         } catch (error) {
           console.error('永久删除失败:', error);
           showToast(error.message || '永久删除失败', 'error');
+        }
+      }
+      return; // 按钮操作已处理，不再继续
+      }
+      
+      // 如果不是点击按钮，检查是否点击在表格行上
+      const row = e.target.closest('tr[data-id]');
+      if (row) {
+        const id = row.getAttribute('data-id');
+        if (id && window.openDetailById) {
+          await window.openDetailById(id);
         }
       }
     });
@@ -2901,6 +3027,23 @@ function bindEvents() {
     });
   });
 
+  // 性能监控面板按钮（仅在开发环境显示）
+  const elBtnPerformance = document.getElementById('btn-performance-panel');
+  if (elBtnPerformance) {
+    // 检查是否在开发环境
+    const isDev = window.location.hostname === 'localhost' || 
+                  window.location.hostname === '127.0.0.1' ||
+                  window.location.search.includes('perf=1');
+    
+    if (isDev) {
+      elBtnPerformance.classList.remove('hidden');
+      elBtnPerformance.addEventListener('click', async () => {
+        const { default: performancePanel } = await import('./performance-panel.js');
+        performancePanel.toggle();
+      });
+    }
+  }
+
   // 刷新 - 根据当前视图刷新对应内容
   if (elBtnRefresh) {
     elBtnRefresh.addEventListener('click', async () => {
@@ -2972,37 +3115,65 @@ function bindEvents() {
 async function init() {
   try {
     console.log('开始初始化应用...');
+    
+    // 1. 立即显示页面框架（不等待任何数据）
     bindEvents();
     console.log('事件绑定完成');
     
     // 从 localStorage 恢复上次的视图，如果没有则默认显示工作台
     const lastView = storage.get('lastView', 'dashboard');
-    switchView(lastView);
+    switchView(lastView); // 这会显示骨架屏
     console.log('视图切换完成:', lastView);
     
     setFilter('all');
     console.log('筛选器设置完成');
     
-    // 初始化时设置为未加载
-    try {
-      await loadSettings();
-      console.log('设置加载完成');
-    } catch (error) {
-      console.error('加载设置失败:', error);
+    // 2. 异步加载数据（不阻塞页面显示）
+    // 使用 requestIdleCallback 或 setTimeout 延迟非关键数据加载
+    const loadDataAsync = () => {
+      // 延迟加载设置（非关键）
+      setTimeout(async () => {
+        try {
+          await loadSettings();
+          console.log('设置加载完成');
+        } catch (error) {
+          console.error('加载设置失败:', error);
+        }
+      }, 100);
+      
+      // 延迟加载数据（关键数据，但可以异步）
+      setTimeout(async () => {
+        try {
+          if (lastView === 'knowledge-items') {
+            // 知识库视图：快速加载前 20 条
+            const { loadKnowledgeItems } = await import('./knowledge-items.js');
+            await loadKnowledgeItems({ page: 1, limit: 20 });
+          } else if (lastView === 'consultation') {
+            // 咨询视图：延迟加载，由咨询模块自己处理
+            // 不在这里加载，避免阻塞
+          } else {
+            // 其他视图：快速加载前 20 条
+            await loadItemsFast();
+          }
+          console.log('数据加载完成');
+        } catch (error) {
+          console.error('加载数据失败:', error);
+          // 即使加载失败，也要显示界面
+          if (elDashboardSubtitle) {
+            elDashboardSubtitle.textContent = '数据加载失败，请刷新页面重试';
+          }
+        }
+      }, 200);
+    };
+    
+    // 使用 requestIdleCallback（如果支持）或 setTimeout
+    if (window.requestIdleCallback) {
+      requestIdleCallback(loadDataAsync, { timeout: 500 });
+    } else {
+      setTimeout(loadDataAsync, 0);
     }
     
-    try {
-      await loadItems();
-      console.log('数据加载完成');
-    } catch (error) {
-      console.error('加载数据失败:', error);
-      // 即使加载失败，也要显示界面
-      if (elDashboardSubtitle) {
-        elDashboardSubtitle.textContent = '数据加载失败，请刷新页面重试';
-      }
-    }
-    
-    console.log('应用初始化完成');
+    console.log('应用初始化完成（页面框架已显示）');
   } catch (error) {
     console.error('初始化失败:', error);
     console.error('错误堆栈:', error.stack);

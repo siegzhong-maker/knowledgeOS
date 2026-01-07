@@ -20,6 +20,10 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// 性能监控中间件（在所有路由之前）
+const { performanceMiddleware } = require('./middleware/performance');
+app.use(performanceMiddleware);
+
 // 静态文件服务（前端）
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -38,6 +42,7 @@ app.use('/api/knowledge-bases', require('./routes/knowledge-bases'));
 app.use('/api/knowledge', require('./routes/knowledge'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/migrate', require('./routes/migrate'));
+app.use('/api/performance', require('./routes/performance'));
 
 // 健康检查
 app.get('/api/health', (req, res) => {
@@ -466,6 +471,9 @@ async function ensureDatabaseInitialized() {
       // 优化 COUNT 查询：创建覆盖索引（包含常用查询字段）
       await client.query(`CREATE INDEX IF NOT EXISTS idx_items_count_cover ON source_items(status, knowledge_base_id) WHERE status != 'archived'`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_count_cover ON personal_knowledge_items(status, knowledge_base_id)`);
+      
+      // settings 表索引（优化查询性能）
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key)`);
       
       console.log('✓ 索引已创建（包括复合索引和覆盖索引）');
 

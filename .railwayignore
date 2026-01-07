@@ -1,0 +1,43 @@
+# Railway 部署忽略文件
+# 这些文件不会被打包到 Docker 镜像中
+
+# 开发文件
+node_modules/
+.env
+.env.local
+*.log
+
+# 数据库文件（生产环境使用 PostgreSQL）
+database/*.db
+database/*.db-journal
+database/.encryption_key
+
+# 上传文件（使用 Volume）
+backend/uploads/
+
+# 构建产物
+dist/
+build/
+
+# IDE 文件
+.DS_Store
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# 文档（可选，如果镜像大小是问题）
+*.md
+!README.md
+
+# 测试文件
+test/
+tests/
+__tests__/
+
+# 脚本（可选，如果不需要）
+backend/scripts/migrate-*.js
+backend/scripts/diagnose.js
+

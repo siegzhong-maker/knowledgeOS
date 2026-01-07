@@ -246,6 +246,9 @@ async function initDatabase() {
     
     // personal_knowledge_items 表索引（subcategory_id）
     await client.query(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_subcategory ON personal_knowledge_items(subcategory_id)`);
+    
+    // settings 表索引（优化查询性能）
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key)`);
     // 为搜索优化：创建文本搜索索引（如果PostgreSQL支持）
     try {
       // 尝试创建GIN索引用于全文搜索（需要pg_trgm扩展）

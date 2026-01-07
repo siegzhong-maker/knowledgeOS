@@ -1,6 +1,105 @@
 const { Pool } = require('pg');
 const dns = require('dns');
 
+// 数据库查询性能监控
+const queryPerformance = {
+  queries: [],
+  maxRecords: 500,
+  enabled: process.env.NODE_ENV !== 'production' || process.env.ENABLE_PERF === '1'
+};
+
+// 记录查询性能
+function recordQuery(sql, params, duration, resultSize) {
+  if (!queryPerformance.enabled) return;
+  
+  const record = {
+    sql: sql.substring(0, 200), // 限制 SQL 长度
+    params: Array.isArray(params) ? params.slice(0, 5) : params, // 限制参数数量
+    duration,
+    resultSize,
+    timestamp: Date.now(),
+    severity: getQuerySeverity(duration)
+  };
+
+  queryPerformance.queries.push(record);
+  
+  // 限制记录数量
+  if (queryPerformance.queries.length > queryPerformance.maxRecords) {
+    queryPerformance.queries.shift();
+  }
+
+  // 输出慢查询警告
+  if (duration >= 100) {
+    console.warn(`⚠️ 慢查询 (${duration}ms): ${sql.substring(0, 100)}...`);
+  }
+}
+
+function getQuerySeverity(duration) {
+  if (duration >= 1000) return 'critical';
+  if (duration >= 500) return 'severe';
+  if (duration >= 100) return 'warning';
+  return 'normal';
+}
+
+// 获取查询性能摘要
+function getQuerySummary() {
+  const queries = queryPerformance.queries;
+  if (queries.length === 0) {
+    return { totalQueries: 0, message: '暂无查询数据' };
+  }
+
+  const totalDuration = queries.reduce((sum, q) => sum + q.duration, 0);
+  const avgDuration = totalDuration / queries.length;
+
+  // 按 SQL 模式分组（简化 SQL，移除具体参数值）
+  const byPattern = {};
+  queries.forEach(q => {
+    // 简化 SQL，移除参数值，用于分组
+    const pattern = q.sql.replace(/\$\d+/g, '$?').substring(0, 100);
+    if (!byPattern[pattern]) {
+      byPattern[pattern] = {
+        pattern,
+        count: 0,
+        totalDuration: 0,
+        minDuration: Infinity,
+        maxDuration: 0,
+        avgDuration: 0
+      };
+    }
+
+    const stats = byPattern[pattern];
+    stats.count++;
+    stats.totalDuration += q.duration;
+    stats.minDuration = Math.min(stats.minDuration, q.duration);
+    stats.maxDuration = Math.max(stats.maxDuration, q.duration);
+  });
+
+  Object.values(byPattern).forEach(stats => {
+    stats.avgDuration = stats.totalDuration / stats.count;
+  });
+
+  // 找出最慢的查询
+  const slowest = [...queries]
+    .sort((a, b) => b.duration - a.duration)
+    .slice(0, 20);
+
+  const severityCounts = {
+    critical: queries.filter(q => q.severity === 'critical').length,
+    severe: queries.filter(q => q.severity === 'severe').length,
+    warning: queries.filter(q => q.severity === 'warning').length,
+    normal: queries.filter(q => q.severity === 'normal').length
+  };
+
+  return {
+    totalQueries: queries.length,
+    totalDuration,
+    avgDuration,
+    byPattern,
+    slowest,
+    severityCounts
+  };
+}
+
 // 强制使用 IPv4 解析，避免 Railway 环境中的 DNS 解析问题
 // Node.js 17.0.0+ 支持此 API
 if (dns.setDefaultResultOrder) {
@@ -133,34 +232,47 @@ class Database {
     return sql;
   }
 
-  // 通用查询方法 - 返回单行
+  // 通用查询方法 - 返回单行（带性能监控）
   async get(sql, params = []) {
+    const startTime = Date.now();
     try {
       let convertedSql = this.convertPlaceholders(sql);
       convertedSql = this.fixBooleanQueries(convertedSql);
       const result = await this._pool.query(convertedSql, params);
+      const duration = Date.now() - startTime;
+      const resultSize = result.rows[0] ? JSON.stringify(result.rows[0]).length : 0;
+      recordQuery(sql, params, duration, resultSize);
       return result.rows[0] || null;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      recordQuery(sql, params, duration, 0);
       console.error('Database get error:', error);
       throw error;
     }
   }
 
-  // 通用查询方法 - 返回多行
+  // 通用查询方法 - 返回多行（带性能监控）
   async all(sql, params = []) {
+    const startTime = Date.now();
     try {
       let convertedSql = this.convertPlaceholders(sql);
       convertedSql = this.fixBooleanQueries(convertedSql);
       const result = await this._pool.query(convertedSql, params);
+      const duration = Date.now() - startTime;
+      const resultSize = result.rows ? JSON.stringify(result.rows).length : 0;
+      recordQuery(sql, params, duration, resultSize);
       return result.rows || [];
     } catch (error) {
+      const duration = Date.now() - startTime;
+      recordQuery(sql, params, duration, 0);
       console.error('Database all error:', error);
       throw error;
     }
   }
 
-  // 执行SQL语句（INSERT, UPDATE, DELETE）
+  // 执行SQL语句（INSERT, UPDATE, DELETE）（带性能监控）
   async run(sql, params = []) {
+    const startTime = Date.now();
     try {
       let convertedSql = this.convertPlaceholders(sql);
       convertedSql = this.fixBooleanQueries(convertedSql);
@@ -180,6 +292,8 @@ class Database {
       });
       
       const result = await this._pool.query(convertedSql, convertedParams);
+      const duration = Date.now() - startTime;
+      recordQuery(sql, params, duration, 0);
       
       // 返回与SQLite兼容的格式
       return {
@@ -187,9 +301,19 @@ class Database {
         changes: result.rowCount || 0
       };
     } catch (error) {
+      const duration = Date.now() - startTime;
+      recordQuery(sql, params, duration, 0);
       console.error('Database run error:', error);
       throw error;
     }
+  }
+
+  // 获取查询性能数据
+  getQueryPerformance() {
+    return {
+      queries: queryPerformance.queries,
+      summary: getQuerySummary()
+    };
   }
 }
 
