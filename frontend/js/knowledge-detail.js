@@ -121,7 +121,7 @@ function renderDetailDrawer() {
         <div class="flex flex-col">
           <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">知识详情</span>
           <div class="flex items-center gap-2">
-            ${createStatusBadge(currentItem.status)}
+            ${createStatusBadge(currentItem.status, currentItem)}
             ${currentItem.status === 'pending' ? `
               <span class="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded animate-pulse">需人工确认</span>
             ` : ''}
@@ -410,7 +410,7 @@ function renderKeyConclusions() {
 function renderRelatedKnowledge() {
   // 如果正在加载，显示加载提示
   if (currentItem._loadingRelated) {
-    return '<div class="text-slate-400 text-sm italic py-2 flex items-center gap-2"><i data-lucide="loader-2" size="14" class="animate-spin"></i> 正在加载相关知识...</div>';
+    return '<div class="text-slate-400 text-sm italic py-2 flex items-center gap-2"><i data-lucide="loader-2" size="14" class="animate-spin text-indigo-600"></i> 正在加载相关知识...</div>';
   }
   
   if (!currentItem.relatedKnowledge || currentItem.relatedKnowledge.length === 0) {
@@ -778,14 +778,47 @@ function removeKeyConclusion(index) {
 /**
  * 创建状态徽章
  */
-function createStatusBadge(status) {
-  const config = {
-    confirmed: { color: 'bg-blue-50 text-blue-600 border-blue-100', label: '已确认', icon: 'check-circle', showManual: true },
-    pending: { color: 'bg-amber-50 text-amber-600 border-amber-100', label: '待审核', icon: 'alert-circle', showManual: false },
-    archived: { color: 'bg-gray-100 text-gray-500 border-gray-200', label: '已归档', icon: 'archive', showManual: false }
-  };
+function createStatusBadge(status, item = {}) {
+  // 检查metadata以确定是否自动确认或高置信度
+  let metadata = {};
+  try {
+    if (item.metadata) {
+      metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+    }
+  } catch (e) {
+    // 忽略解析错误
+  }
   
-  const { color, label, icon, showManual } = config[status] || config.confirmed;
+  const confidence = item.confidence_score || 0;
+  const isAutoConfirmed = metadata.autoConfirmed === true;
+  
+  let config;
+  if (status === 'confirmed') {
+    config = {
+      color: 'bg-blue-50 text-blue-600 border-blue-100',
+      label: isAutoConfirmed ? '已确认（自动）' : '已确认',
+      icon: 'check-circle',
+      showManual: !isAutoConfirmed
+    };
+  } else if (status === 'pending') {
+    // 所有pending状态统一显示为"待确认"，无论置信度高低
+    config = {
+      color: 'bg-slate-100 text-slate-500 border-slate-200',
+      label: '待确认',
+      icon: 'circle',
+      showManual: false
+    };
+  } else {
+    // archived
+    config = {
+      color: 'bg-gray-100 text-gray-500 border-gray-200',
+      label: '已归档',
+      icon: 'archive',
+      showManual: false
+    };
+  }
+  
+  const { color, label, icon, showManual } = config;
   
   return `
     <span class="px-2 py-0.5 rounded-md text-xs font-medium border flex items-center gap-1 ${color}">

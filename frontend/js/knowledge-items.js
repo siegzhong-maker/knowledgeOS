@@ -252,13 +252,23 @@ function applyFilters() {
  * 创建置信度徽章
  */
 function createConfidenceBadge(score) {
-  const isHigh = score >= 80;
+  // 根据置信度确定颜色档位（简化版本，只显示数字）
+  let colorClasses;
+  if (score >= 90) {
+    colorClasses = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  } else if (score >= 85) {
+    colorClasses = 'bg-blue-50 text-blue-700 border-blue-200';
+  } else if (score >= 80) {
+    colorClasses = 'bg-slate-50 text-slate-600 border-slate-200';
+  } else if (score >= 70) {
+    colorClasses = 'bg-amber-50 text-amber-600 border-amber-200';
+  } else {
+    colorClasses = 'bg-orange-50 text-orange-600 border-orange-200';
+  }
+  
   return `
-    <div class="flex items-center space-x-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
-      isHigh ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-    }">
-      <i data-lucide="${isHigh ? 'check-circle' : 'alert-circle'}" size="12"></i>
-      <span>${score}% 置信度</span>
+    <div class="px-2 py-0.5 rounded text-[10px] font-medium border ${colorClasses}">
+      ${score}%
     </div>
   `;
 }
@@ -266,20 +276,55 @@ function createConfidenceBadge(score) {
 /**
  * 创建状态徽章
  */
-function createStatusBadge(status) {
-  const config = {
-    confirmed: { color: 'bg-blue-50 text-blue-600 border-blue-100', label: '已确认', icon: 'check-circle', showManual: true },
-    pending: { color: 'bg-amber-50 text-amber-600 border-amber-100', label: '待审核', icon: 'alert-circle', showManual: false },
-    archived: { color: 'bg-gray-100 text-gray-500 border-gray-200', label: '已归档', icon: 'archive', showManual: false }
-  };
+function createStatusBadge(status, item) {
+  // 检查metadata以确定是否自动确认或高置信度
+  let metadata = {};
+  try {
+    if (item.metadata) {
+      metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+    }
+  } catch (e) {
+    // 忽略解析错误
+  }
   
-  const { color, label, icon, showManual } = config[status] || config.confirmed;
+  const confidence = item.confidence_score || 0;
+  const isHighConfidence = confidence >= 85;
+  const isAutoConfirmed = metadata.autoConfirmed === true;
+  
+  let config;
+  if (status === 'confirmed') {
+    config = {
+      color: 'bg-blue-50 text-blue-600 border-blue-100',
+      label: isAutoConfirmed ? '已确认（自动）' : '已确认',
+      icon: 'check-circle',
+      showManual: !isAutoConfirmed
+    };
+  } else if (status === 'pending') {
+    // 所有pending状态统一显示为"待确认"，无论置信度高低
+    // 置信度信息通过置信度徽章和顶部装饰条来体现
+    config = {
+      color: 'bg-slate-100 text-slate-500 border-slate-200',
+      label: '待确认',
+      icon: 'circle',
+      showManual: false
+    };
+  } else {
+    // archived
+    config = {
+      color: 'bg-gray-100 text-gray-500 border-gray-200',
+      label: '已归档',
+      icon: 'archive',
+      showManual: false
+    };
+  }
+  
+  const { color, label, icon, showManual } = config;
   
   return `
-    <span class="px-2 py-0.5 rounded-md text-xs font-medium border flex items-center gap-1 ${color}">
-      <i data-lucide="${icon}" size="10"></i>
+    <span class="px-2 py-0.5 rounded text-[10px] font-medium border flex items-center gap-1 ${color}">
+      <i data-lucide="${icon}" size="9"></i>
       ${label}
-      ${showManual ? '<span class="ml-1 text-[10px] opacity-75">(人工确认)</span>' : ''}
+      ${showManual ? '<span class="ml-0.5 text-[9px] opacity-70">(人工)</span>' : ''}
     </span>
   `;
 }
@@ -303,9 +348,23 @@ function createKnowledgeCard(item) {
   card.className = 'group bg-white rounded-xl border border-slate-200 p-5 cursor-pointer hover:shadow-xl hover:border-blue-200 transition-all duration-300 flex flex-col h-full relative overflow-hidden';
   card.setAttribute('data-item-id', item.id);
   
-  // 顶部装饰条
+  // 顶部装饰条 - 根据置信度档位使用不同颜色
+  const confidence = item.confidence_score || 0;
+  let topBarColor;
+  if (confidence >= 90) {
+    topBarColor = 'bg-emerald-500'; // 高度可信
+  } else if (confidence >= 85) {
+    topBarColor = 'bg-cyan-500'; // 可信
+  } else if (confidence >= 80) {
+    topBarColor = 'bg-blue-500'; // 基本可信
+  } else if (confidence >= 70) {
+    topBarColor = 'bg-amber-500'; // 一般
+  } else {
+    topBarColor = 'bg-orange-500'; // 需验证
+  }
+  
   const topBar = document.createElement('div');
-  topBar.className = `absolute top-0 left-0 w-full h-1 ${item.confidence_score >= 80 ? 'bg-emerald-500' : 'bg-amber-500'}`;
+  topBar.className = `absolute top-0 left-0 w-full h-1 ${topBarColor}`;
   card.appendChild(topBar);
 
   // 卡片内容
@@ -317,13 +376,13 @@ function createKnowledgeCard(item) {
   header.className = 'flex justify-between items-start mb-3';
   header.innerHTML = `
     <div class="flex gap-2">
-      ${createStatusBadge(item.status)}
+      ${createStatusBadge(item.status, item)}
       <span class="text-xs text-slate-400 flex items-center">
         <i data-lucide="calendar" size="12" class="mr-1"></i>
         ${formatTime(item.created_at)}
       </span>
     </div>
-    ${createConfidenceBadge(item.confidence_score)}
+    ${createConfidenceBadge(item.confidence_score || 0)}
   `;
   content.appendChild(header);
 
@@ -899,6 +958,62 @@ function initFilterButtons() {
 }
 
 /**
+ * 初始化筛选区域切换按钮
+ */
+function initFilterToggleButton() {
+  const filterBtn = document.getElementById('knowledge-filter-btn');
+  const filtersContainer = document.getElementById('knowledge-filters-container');
+  
+  if (!filterBtn || !filtersContainer) return;
+  
+  // 从localStorage读取用户偏好（默认展开）
+  const savedState = localStorage.getItem('knowledge-filters-visible');
+  const isInitiallyVisible = savedState === null || savedState === 'true';
+  
+  // 设置初始状态
+  if (!isInitiallyVisible) {
+    filtersContainer.classList.add('hidden');
+    updateFilterButtonIcon(filterBtn, false);
+  } else {
+    filtersContainer.classList.remove('hidden');
+    updateFilterButtonIcon(filterBtn, true);
+  }
+  
+  // 绑定点击事件
+  filterBtn.addEventListener('click', () => {
+    const isVisible = !filtersContainer.classList.contains('hidden');
+    
+    if (isVisible) {
+      // 隐藏筛选区域
+      filtersContainer.classList.add('hidden');
+      updateFilterButtonIcon(filterBtn, false);
+      localStorage.setItem('knowledge-filters-visible', 'false');
+    } else {
+      // 显示筛选区域
+      filtersContainer.classList.remove('hidden');
+      updateFilterButtonIcon(filterBtn, true);
+      localStorage.setItem('knowledge-filters-visible', 'true');
+    }
+  });
+}
+
+/**
+ * 更新筛选按钮图标
+ */
+function updateFilterButtonIcon(button, isVisible) {
+  const iconElement = button.querySelector('i');
+  if (!iconElement) return;
+  
+  // 更新图标名称
+  iconElement.setAttribute('data-lucide', isVisible ? 'filter' : 'filter-x');
+  
+  // 重新初始化图标（如果lucide已加载）
+  if (window.lucide) {
+    lucide.createIcons(button);
+  }
+}
+
+/**
  * 初始化搜索
  */
 function initSearch() {
@@ -942,6 +1057,9 @@ export async function initKnowledgeView() {
   
   // 初始化筛选按钮
   initFilterButtons();
+  
+  // 初始化筛选区域切换按钮
+  initFilterToggleButton();
   
   // 初始化搜索
   initSearch();

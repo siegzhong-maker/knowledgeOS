@@ -197,8 +197,24 @@ async function saveKnowledgeItem(knowledgeItem, knowledgeBaseId) {
   const id = `ki-${uuidv4().split('-')[0]}`;
   const now = Date.now();
   
-  // 所有提取的知识默认需要审核
+  // 所有提取的知识点都需要人工确认，不自动确认
+  // 但根据置信度标记不同级别的提示信息
   const status = 'pending';
+  const metadata = {};
+  
+  if (knowledgeItem.confidence >= 90) {
+    // 高置信度标记，但仍需人工确认
+    metadata.highConfidence = true;
+    metadata.confidenceLevel = 'high';
+  } else if (knowledgeItem.confidence >= 85) {
+    // 中高置信度标记
+    metadata.highConfidence = true;
+    metadata.confidenceLevel = 'medium-high';
+  } else {
+    // 普通置信度
+    metadata.highConfidence = false;
+    metadata.confidenceLevel = 'normal';
+  }
 
   // 使用新的子分类词向量距离分类算法
   let category = 'work';
@@ -309,7 +325,7 @@ async function saveKnowledgeItem(knowledgeItem, knowledgeBaseId) {
       knowledgeBaseId,
       now,
       now,
-      JSON.stringify({})
+      JSON.stringify(metadata)
     ]
   );
 
