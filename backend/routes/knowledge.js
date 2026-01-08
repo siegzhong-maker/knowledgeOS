@@ -197,14 +197,44 @@ router.get('/extract/:extractionId/status', async (req, res) => {
 
     // 如果已完成，获取知识点详情
     let knowledgeItems = [];
+    console.log('[后端] 提取任务状态检查', {
+      extractionId,
+      status: task.status,
+      knowledgeItemIds: task.knowledgeItemIds || [],
+      knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
+      knowledgeItemIdsType: Array.isArray(task.knowledgeItemIds) ? 'array' : typeof task.knowledgeItemIds,
+      knowledgeItems: task.knowledgeItems || [],
+      knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0
+    });
+    
     if (task.status === 'completed' && task.knowledgeItemIds.length > 0) {
+      console.log('[后端] 任务已完成，从数据库获取知识点详情', {
+        knowledgeItemIds: task.knowledgeItemIds,
+        count: task.knowledgeItemIds.length
+      });
       const placeholders = task.knowledgeItemIds.map(() => '?').join(',');
       knowledgeItems = await db.all(
         `SELECT id, title, content FROM personal_knowledge_items WHERE id IN (${placeholders})`,
         task.knowledgeItemIds
       );
+      console.log('[后端] 从数据库获取到的知识点', {
+        requestedIds: task.knowledgeItemIds,
+        foundItems: knowledgeItems.length,
+        foundIds: knowledgeItems.map(item => item.id)
+      });
     } else if (task.knowledgeItems && task.knowledgeItems.length > 0) {
+      console.log('[后端] 使用任务中的 knowledgeItems', {
+        count: task.knowledgeItems.length
+      });
       knowledgeItems = task.knowledgeItems;
+    } else {
+      console.log('[后端] ⚠️ 任务已完成但没有知识点数据', {
+        status: task.status,
+        hasKnowledgeItemIds: !!task.knowledgeItemIds,
+        knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
+        hasKnowledgeItems: !!task.knowledgeItems,
+        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0
+      });
     }
 
     // 计算进度百分比（优先使用任务中的progress，否则计算）
@@ -219,20 +249,32 @@ router.get('/extract/:extractionId/status', async (req, res) => {
       ? calculateETA(task.progressHistory, progress, task.startTime || Date.now())
       : null;
 
+    const responseData = {
+      status: task.status,
+      stage: task.stage || 'extracting',
+      totalItems: task.totalItems || 0,
+      processedItems: task.processedItems || 0,
+      extractedCount: task.extractedCount || 0,
+      currentDocIndex: task.currentDocIndex || 0,
+      knowledgeItems: knowledgeItems || [],
+      knowledgeItemIds: task.knowledgeItemIds || [],
+      progress: progress,
+      etaSeconds: etaSeconds
+    };
+    
+    console.log('[后端] 返回提取状态响应', {
+      extractionId,
+      status: responseData.status,
+      knowledgeItemIds: responseData.knowledgeItemIds,
+      knowledgeItemIdsLength: responseData.knowledgeItemIds.length,
+      knowledgeItemIdsType: Array.isArray(responseData.knowledgeItemIds) ? 'array' : typeof responseData.knowledgeItemIds,
+      knowledgeItemsLength: responseData.knowledgeItems.length,
+      extractedCount: responseData.extractedCount
+    });
+    
     res.json({
       success: true,
-      data: {
-        status: task.status,
-        stage: task.stage || 'extracting',
-        totalItems: task.totalItems || 0,
-        processedItems: task.processedItems || 0,
-        extractedCount: task.extractedCount || 0,
-        currentDocIndex: task.currentDocIndex || 0,
-        knowledgeItems: knowledgeItems || [],
-        knowledgeItemIds: task.knowledgeItemIds || [],
-        progress: progress,
-        etaSeconds: etaSeconds
-      }
+      data: responseData
     });
   } catch (error) {
     console.error('获取提取状态失败:', error);

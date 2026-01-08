@@ -181,6 +181,20 @@ async function pollExtractionStatus(extractionId) {
       etaSeconds
     } = response.data;
     
+    // 调试：记录每次轮询的完整响应数据
+    console.log('[提取] 轮询状态响应', {
+      extractionId,
+      status,
+      stage,
+      extractedCount,
+      knowledgeItemIds: knowledgeItemIds || [],
+      knowledgeItemIdsType: Array.isArray(knowledgeItemIds) ? 'array' : typeof knowledgeItemIds,
+      knowledgeItemIdsLength: Array.isArray(knowledgeItemIds) ? knowledgeItemIds.length : 0,
+      knowledgeItems: knowledgeItems || [],
+      knowledgeItemsLength: Array.isArray(knowledgeItems) ? knowledgeItems.length : 0,
+      fullResponse: response.data
+    });
+    
     // 更新任务状态
     task.status = status;
     task.processedItems = processedItems;
@@ -255,31 +269,66 @@ async function pollExtractionStatus(extractionId) {
         if (latestIds && latestIds.length > 0 && typeof window !== 'undefined' && window.localStorage) {
           // 统一转换为字符串，确保类型一致
           const idsAsStrings = latestIds.map(id => String(id));
-          window.localStorage.setItem('latestExtractionHighlightIds', JSON.stringify(idsAsStrings));
-          console.log('[提取] 已保存本次提取高亮ID到 localStorage:', idsAsStrings.length, '个', idsAsStrings);
+          
+          // 验证转换后的 ID
+          console.log('[提取] ID 转换验证', {
+            originalIds: latestIds,
+            convertedIds: idsAsStrings,
+            allAreStrings: idsAsStrings.every(id => typeof id === 'string'),
+            conversionSuccess: idsAsStrings.length === latestIds.length
+          });
+          
+          // 保存到 localStorage
+          const storageKey = 'latestExtractionHighlightIds';
+          const storageValue = JSON.stringify(idsAsStrings);
+          window.localStorage.setItem(storageKey, storageValue);
+          
+          // 验证保存是否成功
+          const savedValue = window.localStorage.getItem(storageKey);
+          const savedIds = savedValue ? JSON.parse(savedValue) : null;
+          console.log('[提取] localStorage 保存验证', {
+            storageKey,
+            savedValue,
+            savedIds,
+            savedIdsLength: savedIds ? savedIds.length : 0,
+            saveSuccess: JSON.stringify(savedIds) === storageValue,
+            savedIdsType: savedIds && savedIds.length > 0 ? typeof savedIds[0] : 'unknown'
+          });
+          
+          console.log('[提取] ✅ 已保存本次提取高亮ID到 localStorage:', idsAsStrings.length, '个', idsAsStrings);
           
           // 如果当前在知识库视图，主动刷新高亮显示
           try {
             const knowledgeView = document.getElementById('view-knowledge-items');
-            if (knowledgeView && !knowledgeView.classList.contains('hidden')) {
+            const isKnowledgeViewVisible = knowledgeView && !knowledgeView.classList.contains('hidden');
+            console.log('[提取] 知识库视图状态检查', {
+              knowledgeViewExists: !!knowledgeView,
+              isVisible: isKnowledgeViewVisible,
+              currentView: window.currentView || 'unknown'
+            });
+            
+            if (isKnowledgeViewVisible) {
               console.log('[提取] 当前在知识库视图，主动刷新显示');
               // 当前在知识库视图，主动刷新
               import('./knowledge-items.js').then(({ refreshKnowledgeView }) => {
+                console.log('[提取] 调用 refreshKnowledgeView');
                 refreshKnowledgeView();
               }).catch(e => {
-                console.warn('刷新知识库视图失败:', e);
+                console.error('[提取] 刷新知识库视图失败:', e);
               });
             } else {
               console.log('[提取] 当前不在知识库视图，用户切换到知识库视图时会自动显示');
             }
           } catch (e) {
-            console.warn('检查知识库视图状态失败:', e);
+            console.error('[提取] 检查知识库视图状态失败:', e);
           }
         } else {
-          console.warn('[提取] 没有找到知识点ID，无法保存高亮信息', {
+          console.error('[提取] ❌ 没有找到知识点ID，无法保存高亮信息', {
             latestIds,
             latestIdsLength: latestIds ? latestIds.length : 0,
-            hasLocalStorage: typeof window !== 'undefined' && window.localStorage
+            latestIdsType: latestIds ? (Array.isArray(latestIds) ? 'array' : typeof latestIds) : 'null',
+            hasLocalStorage: typeof window !== 'undefined' && window.localStorage,
+            hasWindow: typeof window !== 'undefined'
           });
         }
       } catch (e) {
