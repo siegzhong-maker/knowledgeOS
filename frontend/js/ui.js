@@ -123,6 +123,8 @@ const $ = (id) => document.getElementById(id);
 // const elQuickInput = $('quick-input');
 // const elGlobalSearch = $('global-search');
 const elCardGrid = $('card-grid');
+const elDashboardSkeleton = $('dashboard-skeleton');
+const elDashboardGreeting = $('dashboard-greeting');
 const elRepoList = $('repo-list');
 const elDashboardSubtitle = $('dashboard-subtitle');
 const elApiPill = $('api-pill');
@@ -159,7 +161,6 @@ const elChatHistory = $('chat-history');
 const elChatInput = $('chat-input');
 const elBtnSendChat = $('btn-send-chat');
 const elBtnGenerateSummary = $('btn-generate-summary');
-const elBtnBatchSummary = $('btn-batch-summary');
 const elBtnCloseDetail = $('btn-close-detail');
 const elRepoSearchInput = $('repo-search-input');
 const elTagsContainer = $('tags-container');
@@ -236,6 +237,19 @@ function switchView(view) {
   }
   if (view === 'dashboard') {
     elViewDashboard.classList.remove('hidden');
+    // 更新问候语
+    updateGreeting();
+    // 如果数据为空，显示骨架屏
+    if (allItems.length === 0) {
+      if (elDashboardSkeleton) {
+        renderSkeleton();
+        elDashboardSkeleton.classList.remove('hidden');
+      }
+      if (elCardGrid) {
+        elCardGrid.classList.add('hidden');
+        elCardGrid.classList.remove('fade-in');
+      }
+    }
     // 切换到工作台时重新加载数据
     loadItems();
   }
@@ -347,7 +361,74 @@ function setFilter(filter) {
   scheduleRender(['cards', 'repoList']);
 }
 
+// 获取时间相关的问候语
+function getTimeBasedGreeting() {
+  const hour = new Date().getHours();
+  
+  if (hour >= 5 && hour < 12) {
+    return { text: '早安, 探索者', emoji: '☀️' };
+  } else if (hour >= 12 && hour < 14) {
+    return { text: '午安, 探索者', emoji: '🌤️' };
+  } else if (hour >= 14 && hour < 18) {
+    return { text: '下午好, 探索者', emoji: '☁️' };
+  } else if (hour >= 18 && hour < 22) {
+    return { text: '晚上好, 探索者', emoji: '🌙' };
+  } else {
+    return { text: '夜深了, 探索者', emoji: '✨' };
+  }
+}
+
+// 更新问候语
+function updateGreeting() {
+  if (elDashboardGreeting) {
+    const greeting = getTimeBasedGreeting();
+    elDashboardGreeting.textContent = `${greeting.text} ${greeting.emoji}`;
+  }
+}
+
 // 渲染卡片
+// 渲染骨架屏
+function renderSkeleton() {
+  if (!elDashboardSkeleton) return;
+  
+  // 根据响应式网格，渲染 8 个骨架卡片（2行，每行4个）
+  const skeletonCount = 8;
+  const skeletonCards = Array(skeletonCount).fill(0).map(() => `
+    <article 
+      class="skeleton-card bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col"
+      style="min-height: 280px;"
+    >
+      <div class="p-5 flex flex-col flex-1 min-h-0">
+        <div class="flex items-center justify-between mb-3 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="skeleton-line w-12 h-4"></div>
+            <div class="skeleton-line w-20 h-4"></div>
+          </div>
+          <div class="skeleton-line w-16 h-4"></div>
+        </div>
+        <div class="mb-2 flex-shrink-0">
+          <div class="skeleton-line w-full h-5 mb-2"></div>
+          <div class="skeleton-line w-3/4 h-5"></div>
+        </div>
+        <div class="mb-3 flex-1 min-h-0">
+          <div class="skeleton-line w-full h-3 mb-2"></div>
+          <div class="skeleton-line w-full h-3 mb-2"></div>
+          <div class="skeleton-line w-2/3 h-3"></div>
+        </div>
+        <div class="flex justify-between items-center mt-auto pt-2 border-t border-slate-100 flex-shrink-0 gap-2">
+          <div class="flex flex-wrap gap-1 flex-1 min-w-0">
+            <div class="skeleton-line w-12 h-5 rounded-full"></div>
+            <div class="skeleton-line w-14 h-5 rounded-full"></div>
+          </div>
+          <div class="skeleton-line w-16 h-4 flex-shrink-0"></div>
+        </div>
+      </div>
+    </article>
+  `).join('');
+  
+  elDashboardSkeleton.innerHTML = skeletonCards;
+}
+
 function renderCards() {
   const perfMonitor = window.performanceMonitor;
   const timer = perfMonitor ? perfMonitor.start('render-cards') : null;
@@ -2023,82 +2104,6 @@ function showTagSelectionModal(itemId, suggestedTags) {
 }
 
 // 批量生成摘要
-async function handleBatchSummary() {
-  if (!apiConfigured) {
-    showToast('请先在设置中配置 DeepSeek API Key', 'info');
-    openSettingsModal();
-    return;
-  }
-
-  // 找出所有没有摘要且有内容的知识项
-  const itemsToSummarize = allItems.filter(
-    (item) => !item.summary_ai && item.raw_content && item.raw_content.trim().length > 0
-  );
-
-  if (itemsToSummarize.length === 0) {
-    showToast('所有内容都已生成摘要', 'info');
-    return;
-  }
-
-  const btn = elBtnBatchSummary;
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> 生成中...';
-
-  const loadingToast = showLoadingToast(`正在为 ${itemsToSummarize.length} 条内容生成摘要...`);
-
-  let successCount = 0;
-  let failCount = 0;
-
-  try {
-    for (let i = 0; i < itemsToSummarize.length; i++) {
-      const item = itemsToSummarize[i];
-      try {
-        const res = await aiAPI.generateSummary(item.raw_content, item.id);
-        const summary = res.data.summary;
-
-        // 更新 allItems
-        allItems = allItems.map((it) =>
-          it.id === item.id ? { ...it, summary_ai: summary } : it
-        );
-
-        successCount++;
-
-        // 每5个更新一次UI
-        if ((i + 1) % 5 === 0 || i === itemsToSummarize.length - 1) {
-          scheduleRender(['cards', 'repoList']);
-        }
-      } catch (error) {
-        console.error(`为 ${item.title} 生成摘要失败:`, error);
-        failCount++;
-      }
-
-      // 避免请求过快
-      if (i < itemsToSummarize.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
-
-    // 重新加载数据确保同步
-    await loadItems();
-
-    loadingToast.close();
-    
-    if (failCount === 0) {
-      showToast(`成功为 ${successCount} 条内容生成摘要`, 'success');
-    } else {
-      showToast(`完成：成功 ${successCount} 条，失败 ${failCount} 条`, failCount > successCount ? 'error' : 'info');
-    }
-  } catch (error) {
-    loadingToast.close();
-    console.error('批量生成摘要失败:', error);
-    showToast(error.message || '批量生成摘要失败', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = originalText;
-  }
-}
-
 // 修复摘要显示问题：生成摘要后重新加载数据
 async function refreshItemAfterSummary(itemId) {
   try {
@@ -2127,13 +2132,28 @@ async function loadItemsFast() {
   const perfMonitor = window.performanceMonitor;
   const timer = perfMonitor ? perfMonitor.start('load-items-fast') : null;
   
+  // 记录开始加载时间，用于计算最小显示时间
+  const startTime = Date.now();
+  const MIN_DISPLAY_TIME = 800; // 骨架屏最小显示时间（毫秒）
+  
   try {
     repoLoading = true;
     scheduleRender('repoList');
 
+    // 显示骨架屏
+    if (elDashboardSkeleton && currentView === 'dashboard') {
+      renderSkeleton();
+      elDashboardSkeleton.classList.remove('hidden');
+    }
+    // 隐藏实际内容容器
+    if (elCardGrid) {
+      elCardGrid.classList.add('hidden');
+      elCardGrid.classList.remove('fade-in');
+    }
+
     // 显示加载状态
     if (elDashboardSubtitle) {
-      elDashboardSubtitle.textContent = '正在加载...';
+      elDashboardSubtitle.textContent = '正在加载内容...';
     }
     
     // 快速加载前 20 条
@@ -2154,14 +2174,43 @@ async function loadItemsFast() {
     
     console.log(`快速加载了 ${newItems.length} 个项目，已加载 ${repoLoadedCount}/${repoTotalCount}`);
     
+    // 先渲染内容，然后再切换显示
     scheduleRender(['cards', 'repoList', 'tagsCloud']);
     
-    // 延迟加载非关键 API（stats），不阻塞主渲染
-    setTimeout(() => {
-      loadDashboardStats().catch(err => {
-        console.warn('统计信息加载失败（非关键）:', err);
+    // 计算已用时间，确保骨架屏至少显示最小时间
+    const elapsedTime = Date.now() - startTime;
+    const remainingTime = Math.max(0, MIN_DISPLAY_TIME - elapsedTime);
+    
+    // 渲染完成后，切换显示状态（使用双重 requestAnimationFrame 确保渲染完成）
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // 延迟隐藏骨架屏，确保最小显示时间
+        setTimeout(() => {
+          // 隐藏骨架屏
+          if (elDashboardSkeleton && currentView === 'dashboard') {
+            elDashboardSkeleton.classList.add('hidden');
+          }
+          // 显示实际内容容器并添加淡入动画
+          if (elCardGrid && currentView === 'dashboard') {
+            elCardGrid.classList.remove('hidden');
+            // 使用 setTimeout 确保样式已应用
+            setTimeout(() => {
+              elCardGrid.classList.add('fade-in');
+              
+              // 内容显示完成后，更新统计信息
+              loadDashboardStats().catch(err => {
+                console.warn('统计信息加载失败（非关键）:', err);
+              });
+            }, 10);
+          } else {
+            // 如果不是 dashboard 视图，也加载统计信息
+            loadDashboardStats().catch(err => {
+              console.warn('统计信息加载失败（非关键）:', err);
+            });
+          }
+        }, remainingTime);
       });
-    }, 500);
+    });
     
     // 更新加载更多按钮状态
     updateLoadMoreButton('repo', hasMore);
@@ -2185,6 +2234,14 @@ async function loadItemsFast() {
     repoLoading = false;
     scheduleRender('repoList');
 
+    // 错误时也要隐藏骨架屏
+    if (elDashboardSkeleton && currentView === 'dashboard') {
+      elDashboardSkeleton.classList.add('hidden');
+    }
+    if (elCardGrid && currentView === 'dashboard') {
+      elCardGrid.classList.remove('hidden');
+    }
+
     if (timer && perfMonitor) {
       perfMonitor.end(timer, { success: false, error: error.message });
     }
@@ -2199,13 +2256,29 @@ async function loadItemsFast() {
 // 加载 items（默认排除archived）
 // 使用分页加载以提高性能
 async function loadItems(reset = true) {
+  // 记录开始加载时间，用于计算最小显示时间（仅在重置加载时）
+  const startTime = reset ? Date.now() : 0;
+  const MIN_DISPLAY_TIME = 800; // 骨架屏最小显示时间（毫秒）
+  
   try {
     repoLoading = true;
     scheduleRender('repoList');
 
+    // 如果是重置加载且当前在 dashboard 视图，显示骨架屏
+    if (reset && currentView === 'dashboard') {
+      if (elDashboardSkeleton) {
+        renderSkeleton();
+        elDashboardSkeleton.classList.remove('hidden');
+      }
+      if (elCardGrid) {
+        elCardGrid.classList.add('hidden');
+        elCardGrid.classList.remove('fade-in');
+      }
+    }
+
     // 显示加载状态
     if (elDashboardSubtitle) {
-      elDashboardSubtitle.textContent = '正在加载...';
+      elDashboardSubtitle.textContent = reset ? '正在加载内容...' : '正在加载更多...';
     }
     
     // 使用合理的分页大小（50条记录）
@@ -2228,19 +2301,61 @@ async function loadItems(reset = true) {
     
     console.log(`加载了 ${newItems.length} 个项目，已加载 ${repoLoadedCount}/${repoTotalCount}`);
     
+    // 先渲染内容，然后再切换显示
     scheduleRender(['cards', 'repoList', 'tagsCloud']);
     
-    // 延迟加载非关键 API（stats），不阻塞主渲染
-    setTimeout(() => {
-      loadDashboardStats().catch(err => {
-        console.warn('统计信息加载失败（非关键）:', err);
+    // 如果是重置加载且当前在 dashboard 视图，切换显示状态（使用双重 requestAnimationFrame 确保渲染完成）
+    if (reset && currentView === 'dashboard') {
+      // 计算已用时间，确保骨架屏至少显示最小时间
+      const elapsedTime = Date.now() - startTime;
+      const remainingTime = Math.max(0, MIN_DISPLAY_TIME - elapsedTime);
+      
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          // 延迟隐藏骨架屏，确保最小显示时间
+          setTimeout(() => {
+            // 隐藏骨架屏
+            if (elDashboardSkeleton) {
+              elDashboardSkeleton.classList.add('hidden');
+            }
+            // 显示实际内容容器并添加淡入动画
+            if (elCardGrid) {
+              elCardGrid.classList.remove('hidden');
+              // 使用 setTimeout 确保样式已应用
+              setTimeout(() => {
+                elCardGrid.classList.add('fade-in');
+                
+                // 内容显示完成后，更新统计信息
+                loadDashboardStats().catch(err => {
+                  console.warn('统计信息加载失败（非关键）:', err);
+                });
+              }, 10);
+            }
+          }, remainingTime);
+        });
       });
-    }, 500);
+    } else {
+      // 如果不是重置加载或不在 dashboard 视图，延迟加载统计信息
+      setTimeout(() => {
+        loadDashboardStats().catch(err => {
+          console.warn('统计信息加载失败（非关键）:', err);
+        });
+      }, 500);
+    }
     
     // 更新加载更多按钮状态
     updateLoadMoreButton('repo', hasMore);
   } catch (error) {
     console.error('加载内容失败:', error);
+    
+    // 错误时也要隐藏骨架屏
+    if (reset && elDashboardSkeleton && currentView === 'dashboard') {
+      elDashboardSkeleton.classList.add('hidden');
+    }
+    if (reset && elCardGrid && currentView === 'dashboard') {
+      elCardGrid.classList.remove('hidden');
+    }
+    
     if (elDashboardSubtitle) {
       elDashboardSubtitle.textContent = '加载失败，请稍后重试';
     }
@@ -3091,9 +3206,6 @@ function bindEvents() {
   if (elBtnGenerateSummary) {
     elBtnGenerateSummary.addEventListener('click', handleGenerateSummary);
   }
-  if (elBtnBatchSummary) {
-    elBtnBatchSummary.addEventListener('click', handleBatchSummary);
-  }
 
   // 设置
   if (elBtnOpenSettings) {
@@ -3393,6 +3505,9 @@ async function init() {
     // 1. 立即显示页面框架（不等待任何数据）
     bindEvents();
     console.log('事件绑定完成');
+    
+    // 更新问候语（在视图切换之前）
+    updateGreeting();
     
     // 从 localStorage 恢复上次的视图，如果没有则默认显示工作台
     const lastView = storage.get('lastView', 'dashboard');
