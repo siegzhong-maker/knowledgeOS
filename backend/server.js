@@ -24,10 +24,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 const { performanceMiddleware } = require('./middleware/performance');
 app.use(performanceMiddleware);
 
-// 静态文件服务（前端）
-app.use(express.static(path.join(__dirname, '../frontend')));
-
-// 路由
+// API路由（必须在静态文件服务之前，避免/api路径被静态文件服务拦截）
 app.use('/api/items', require('./routes/items'));
 app.use('/api/parse', require('./routes/parse'));
 app.use('/api/ai', require('./routes/ai'));
@@ -488,10 +485,24 @@ app.use('/api/*', (req, res) => {
   });
 });
 
+// 静态文件服务（前端）- 必须在API路由之后，避免/api路径被静态文件服务拦截
+// 只服务静态文件，不处理所有请求
+app.use(express.static(path.join(__dirname, '../frontend'), {
+  // 不要自动处理index.html，让下面的路由处理
+  index: false
+}));
+
 // 404处理 - 前端路由（SPA支持）
+// 只有在静态文件服务找不到文件时才到这里
 app.get('*', (req, res) => {
-  // 如果是API请求，已经在上面的中间件处理了
-  // 这里只处理前端路由，返回index.html
+  // 排除API路径，API路径已经在上面处理了
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ 
+      success: false, 
+      message: `API端点 ${req.method} ${req.path} 不存在` 
+    });
+  }
+  // 返回index.html用于SPA路由
   res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
