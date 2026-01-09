@@ -16,8 +16,13 @@ const extractionTasks = new Map();
 export async function extractFromDocument(docId, knowledgeBaseId = null, onProgress = null) {
   try {
     // 获取用户API Key用于调试
-    const { getUserApiKey } = await import('./user-manager.js').catch(() => ({ getUserApiKey: () => null }));
-    const userApiKey = await getUserApiKey().catch(() => null);
+    let userApiKey = null;
+    try {
+      const { getCurrentUserApiKey } = await import('./user-manager.js');
+      userApiKey = getCurrentUserApiKey();
+    } catch (e) {
+      console.warn('[提取] 无法获取用户API Key:', e);
+    }
     
     console.log('[提取] 开始提取知识', {
       docId,
