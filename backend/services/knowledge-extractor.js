@@ -197,7 +197,8 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
       cleanedContent,
       sourceItemId,
       0,
-      userApiKey
+      userApiKey,
+      sourcePage
     );
   } else {
     // 内容过长，分块提取
@@ -241,7 +242,8 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
           chunk.text,
           sourceItemId,
           i,
-          userApiKey
+          userApiKey,
+          sourcePage
         );
         
         console.log('[提取] 块提取完成', {
@@ -294,9 +296,10 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
  * @param {string} sourceItemId - 来源文档ID
  * @param {number} chunkIndex - 块索引
  * @param {string} userApiKey - 用户API Key（可选）
+ * @param {number} sourcePage - 来源页码（可选）
  * @returns {Promise<Array>} 提取的知识点数组
  */
-async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex, userApiKey = null) {
+async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex, userApiKey = null, sourcePage = null) {
   const chunkId = chunkIndex > 0 ? `${sourceItemId}-chunk${chunkIndex}` : sourceItemId;
   
   console.log('[提取] extractKnowledgeFromChunk 开始', {
