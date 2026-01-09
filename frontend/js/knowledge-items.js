@@ -3,6 +3,8 @@ import { knowledgeAPI } from './api.js';
 import { formatTime } from './utils.js';
 import { openKnowledgeDetail } from './knowledge-detail.js';
 import { renderTimelineView } from './knowledge-timeline.js';
+import { showConfirm } from './dialog.js';
+import { clearAPICache } from './api.js';
 
 // 分类配置
 const CATEGORY_CONFIG = {
@@ -132,7 +134,21 @@ async function handleBatchConfirm() {
     const ids = pendingItems.map(item => item.id);
     
     // 显示确认对话框
-    const confirmed = confirm(`确定要批量确认 ${ids.length} 个待确认的知识点吗？`);
+    let confirmed;
+    try {
+      confirmed = await showConfirm(
+        `确定要批量确认 ${ids.length} 个待确认的知识点吗？`,
+        { title: '批量确认', type: 'warning' }
+      );
+    } catch (error) {
+      // 用户取消了操作，直接返回，不显示错误提示
+      if (error === false || (error instanceof Error && error.message === '用户取消')) {
+        return;
+      }
+      // 其他错误继续抛出
+      throw error;
+    }
+    
     if (!confirmed) {
       return;
     }
@@ -159,7 +175,11 @@ async function handleBatchConfirm() {
         window.showToast(`成功确认 ${response.count || ids.length} 个知识点`, 'success');
       }
       
-      // 重新加载知识列表
+      // 清除API缓存，确保获取最新数据
+      clearAPICache();
+      // 重置页码为1，确保从第一页开始加载
+      knowledgeState.currentPage = 1;
+      // 重新加载知识列表（缓存已清除，会获取最新数据）
       await loadKnowledgeItems();
     } else {
       // 显示失败提示
@@ -180,6 +200,11 @@ async function handleBatchConfirm() {
       }
     }
   } catch (error) {
+    // 如果用户取消了操作，不显示错误提示
+    if (error === false || error.message === '用户取消') {
+      return;
+    }
+    
     console.error('批量确认失败:', error);
     if (window.showToast) {
       window.showToast('批量确认失败: ' + (error.message || '未知错误'), 'error');
