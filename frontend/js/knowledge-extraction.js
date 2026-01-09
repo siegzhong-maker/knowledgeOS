@@ -15,8 +15,25 @@ const extractionTasks = new Map();
  */
 export async function extractFromDocument(docId, knowledgeBaseId = null, onProgress = null) {
   try {
+    // 获取用户API Key用于调试
+    const { getUserApiKey } = await import('./user-manager.js').catch(() => ({ getUserApiKey: () => null }));
+    const userApiKey = await getUserApiKey().catch(() => null);
+    
+    console.log('[提取] 开始提取知识', {
+      docId,
+      knowledgeBaseId,
+      hasUserApiKey: !!userApiKey,
+      userApiKeyPreview: userApiKey ? `${userApiKey.substring(0, 8)}...` : 'none'
+    });
+    
     // 调用提取API
     const response = await knowledgeAPI.extract([docId], knowledgeBaseId);
+    
+    console.log('[提取] 提取API响应', {
+      success: response.success,
+      extractionId: response.data?.extractionId,
+      message: response.message
+    });
     
     if (!response.success) {
       throw new Error(response.message || '提取失败');
@@ -234,6 +251,29 @@ async function pollExtractionStatus(extractionId) {
     if (status === 'processing') {
       setTimeout(() => pollExtractionStatus(extractionId), 2000); // 每2秒轮询一次
     } else if (status === 'completed') {
+      // 提取完成，检查是否有知识点
+      if (extractedCount === 0 || (knowledgeItemIds && knowledgeItemIds.length === 0)) {
+        console.warn('[提取] ⚠️ 提取完成但未生成知识点', {
+          extractionId,
+          extractedCount,
+          knowledgeItemIdsLength: knowledgeItemIds ? knowledgeItemIds.length : 0,
+          knowledgeItemsLength: knowledgeItems ? knowledgeItems.length : 0,
+          possibleReasons: [
+            'AI未返回知识点数据',
+            'JSON解析失败',
+            '数据验证失败',
+            '数据库保存失败',
+            '文档内容可能不适合提取'
+          ],
+          recommendations: [
+            '查看Railway日志中的[提取]和[保存]相关错误',
+            '访问 /api/diagnose/extraction 查看详细诊断',
+            '确认文档内容是否足够丰富',
+            '尝试提取其他文档'
+          ]
+        });
+      }
+      
       // 提取完成
       // 收集本次提取产生的知识点ID，用于在知识列表中高亮显示
       try {

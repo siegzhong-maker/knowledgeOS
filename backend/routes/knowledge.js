@@ -354,12 +354,30 @@ router.get('/extract/:extractionId/status', async (req, res) => {
       });
       knowledgeItems = task.knowledgeItems;
     } else {
-      console.log('[后端] ⚠️ 任务已完成但没有知识点数据', {
+      // 任务完成但没有知识点数据，记录详细信息用于调试
+      console.warn('[后端] ⚠️ 任务已完成但没有知识点数据', {
         status: task.status,
+        extractionId,
         hasKnowledgeItemIds: !!task.knowledgeItemIds,
         knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
         hasKnowledgeItems: !!task.knowledgeItems,
-        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0
+        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0,
+        extractedCount: task.extractedCount || 0,
+        totalItems: task.totalItems || 0,
+        processedItems: task.processedItems || 0,
+        error: task.error || null,
+        possibleCauses: [
+          task.extractedCount === 0 ? 'AI未返回知识点数据或提取失败' : null,
+          task.error ? `提取过程出错: ${task.error}` : null,
+          '数据保存失败',
+          'JSON解析失败'
+        ].filter(Boolean),
+        recommendations: [
+          '查看Railway日志中的[提取]和[保存]相关错误',
+          '检查AI调用是否成功',
+          '检查数据库表结构是否正确',
+          '尝试提取其他文档'
+        ]
       });
     }
 
@@ -387,6 +405,19 @@ router.get('/extract/:extractionId/status', async (req, res) => {
       progress: progress,
       etaSeconds: etaSeconds
     };
+    
+    // 如果任务完成但没有知识点，添加调试信息
+    if (task.status === 'completed' && (task.extractedCount === 0 || (task.knowledgeItemIds && task.knowledgeItemIds.length === 0))) {
+      responseData.debugInfo = {
+        hasError: !!task.error,
+        error: task.error || null,
+        hasKnowledgeItemIds: !!task.knowledgeItemIds,
+        knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
+        hasKnowledgeItems: !!task.knowledgeItems,
+        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0,
+        recommendation: '查看Railway日志中的[提取]和[保存]相关错误，或访问 /api/diagnose/extraction 查看详细诊断'
+      };
+    }
     
     console.log('[后端] 返回提取状态响应', {
       extractionId,
