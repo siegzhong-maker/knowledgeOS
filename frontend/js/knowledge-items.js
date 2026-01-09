@@ -833,7 +833,11 @@ export function renderKnowledgeView() {
               </div>
               <div>
                 <h3 class="text-base font-bold text-emerald-900">本次新提取</h3>
-                <p class="text-xs text-emerald-600 mt-0.5">共 ${latestItems.length} 条知识点</p>
+                <p class="text-xs text-emerald-600 mt-0.5">
+                  ${otherItems.length === 0 && latestItems.length > 0 
+                    ? `共 ${latestItems.length} 条知识点（当前筛选下全部为本次新提取）` 
+                    : `共 ${latestItems.length} 条知识点`}
+                </p>
               </div>
             </div>
             <button
@@ -869,7 +873,9 @@ export function renderKnowledgeView() {
               </button>
             `}
           </div>
-          <p class="text-xs text-emerald-600 mt-2 opacity-75">点击"只看这些卡片"可仅查看本次新提取的知识点</p>
+          ${otherItems.length === 0 && latestItems.length > 0 
+            ? '<p class="text-xs text-emerald-600 mt-2 opacity-75">以下卡片都是本次新提取的，当前筛选条件下没有其他卡片</p>'
+            : '<p class="text-xs text-emerald-600 mt-2 opacity-75">点击"只看这些卡片"可仅查看本次新提取的知识点</p>'}
         </div>
       `;
 
@@ -903,8 +909,8 @@ export function renderKnowledgeView() {
       latestSection.appendChild(latestGrid);
       fragment.appendChild(latestSection);
 
-      // 只有当 highlightFilterActive 为 false 时才显示分隔线和"全部知识"区域
-      if (!knowledgeState.highlightFilterActive) {
+      // 只有当 highlightFilterActive 为 false 且 otherItems 不为空时才显示分隔线和"全部知识"区域
+      if (!knowledgeState.highlightFilterActive && otherItems.length > 0) {
         // 添加分隔线
         const divider = document.createElement('div');
         divider.className = 'my-6 flex items-center gap-4';
@@ -955,8 +961,8 @@ export function renderKnowledgeView() {
       }
     }
 
-    // 下面是常规知识列表（只有当 highlightFilterActive 为 false 时才显示）
-    if (!knowledgeState.highlightFilterActive) {
+    // 下面是常规知识列表（只有当 highlightFilterActive 为 false 且 otherItems 不为空时才显示）
+    if (!knowledgeState.highlightFilterActive && otherItems.length > 0) {
       const grid = document.createElement('div');
       grid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-20';
       fragment.appendChild(grid);
@@ -965,7 +971,8 @@ export function renderKnowledgeView() {
       container.appendChild(fragment);
 
       // 分批渲染常规知识列表卡片（每次 10 个）
-      const allItemsToRender = otherItems.length > 0 ? otherItems : knowledgeState.filteredItems;
+      // 只渲染 otherItems，不再回退到 filteredItems 避免重复显示
+      const allItemsToRender = otherItems;
       const BATCH_SIZE = 10;
       let gridIndex = 0;
       
@@ -1000,8 +1007,9 @@ export function renderKnowledgeView() {
       // 开始渲染
       requestAnimationFrame(renderGridBatch);
     } else {
-      // 当 highlightFilterActive 为 true 时，只显示本次新提取区域，不需要渲染其他内容
-      // 但需要确保 fragment 已经添加到 DOM
+      // 情况1：highlightFilterActive 为 true，只显示本次新提取区域
+      // 情况2：highlightFilterActive 为 false 但 otherItems.length === 0，所有筛选结果都是本次新提取
+      // 这两种情况都不需要渲染"全部知识"区域，只需要确保 fragment 已经添加到 DOM
       if (fragment.children.length > 0) {
         container.appendChild(fragment);
       }
@@ -1017,7 +1025,7 @@ export function renderKnowledgeView() {
           success: true, 
           itemCount: latestItems.length,
           viewMode: 'grid',
-          highlightFilterActive: true
+          highlightFilterActive: knowledgeState.highlightFilterActive
         });
       }, 100);
     }
