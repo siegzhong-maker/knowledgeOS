@@ -79,8 +79,6 @@ export async function loadKnowledgeItems(filters = {}) {
       params.search = knowledgeState.searchQuery;
     }
 
-    console.log('[知识库] 加载知识列表，参数:', params);
-
     const response = await knowledgeAPI.getItems(params);
     
     if (!response.success) {
@@ -88,33 +86,6 @@ export async function loadKnowledgeItems(filters = {}) {
     }
 
     const { data, total, hasMore } = response;
-    
-    console.log('[知识库] 获取到知识列表:', {
-      count: data?.length || 0,
-      total,
-      hasMore,
-      currentKnowledgeBaseId,
-      filters: params
-    });
-    
-    // 调试：检查子分类数据
-    if (data && data.length > 0) {
-      console.log('[知识库] 知识列表数据示例:', {
-        firstItem: {
-          id: data[0].id,
-          category: data[0].category,
-          subcategory_id: data[0].subcategory_id,
-          subcategory: data[0].subcategory,
-          knowledge_base_id: data[0].knowledge_base_id
-        }
-      });
-    } else {
-      console.warn('[知识库] 未获取到知识点数据，可能原因：', {
-        currentKnowledgeBaseId,
-        filters: params,
-        suggestion: '请检查：1) 是否已提取知识 2) 知识是否保存到了当前知识库'
-      });
-    }
     
     if (knowledgeState.currentPage === 1) {
       knowledgeState.items = data;
@@ -124,16 +95,6 @@ export async function loadKnowledgeItems(filters = {}) {
 
     knowledgeState.hasMore = hasMore;
     knowledgeState.loading = false;
-
-    // 调试：记录知识列表的 ID
-    if (data && data.length > 0) {
-      const itemIds = data.map(item => String(item.id));
-      console.log('[知识库] 加载的知识列表ID:', itemIds);
-      if (knowledgeState.highlightIds.length > 0) {
-        const matchedIds = itemIds.filter(id => knowledgeState.highlightIds.includes(id));
-        console.log('[知识库] 匹配的高亮ID:', matchedIds, '总高亮ID:', knowledgeState.highlightIds);
-      }
-    }
 
     applyFilters();
     renderKnowledgeView();
@@ -224,26 +185,11 @@ function applyFilters() {
 
   // 本次新提取筛选（K2）
   if (knowledgeState.highlightFilterActive && knowledgeState.highlightIds.length > 0) {
-    console.log('[知识库] 应用本次新提取筛选', {
-      highlightFilterActive: knowledgeState.highlightFilterActive,
-      highlightIds: knowledgeState.highlightIds,
-      highlightIdsCount: knowledgeState.highlightIds.length,
-      filteredBeforeCount: filtered.length
-    });
-    
     // 确保类型一致：将 highlightIds 和 item.id 都转换为字符串
     const highlightSet = new Set(knowledgeState.highlightIds.map(id => String(id)));
-    const beforeFilter = filtered.length;
     filtered = filtered.filter(item => {
       const itemId = String(item.id);
-      const isMatched = highlightSet.has(itemId);
-      return isMatched;
-    });
-    
-    console.log('[知识库] 本次新提取筛选结果', {
-      beforeFilter,
-      afterFilter: filtered.length,
-      filteredIds: filtered.map(item => String(item.id))
+      return highlightSet.has(itemId);
     });
 
     // 如果过滤后没有任何卡片，自动退出高亮过滤，恢复全部
@@ -365,17 +311,6 @@ function createStatusBadge(status, item) {
  * 创建知识卡片
  */
 function createKnowledgeCard(item) {
-  // 调试：检查单个item的子分类数据
-  if (item.id && (!item.subcategory || !item.subcategory.name)) {
-    console.log('知识点缺少子分类:', {
-      id: item.id,
-      title: item.title?.substring(0, 30),
-      category: item.category,
-      subcategory_id: item.subcategory_id,
-      subcategory: item.subcategory
-    });
-  }
-  
   const card = document.createElement('div');
   card.className = 'group bg-white rounded-xl border border-slate-200 p-5 cursor-pointer hover:shadow-xl hover:border-blue-200 transition-all duration-300 flex flex-col h-full relative overflow-hidden';
   card.setAttribute('data-item-id', item.id);
@@ -503,53 +438,7 @@ function createKnowledgeCard(item) {
 export function renderKnowledgeView() {
   const container = document.getElementById('view-knowledge-items-content');
   if (!container) {
-    console.warn('知识库视图内容容器不存在');
     return;
-  }
-  
-  // 调试：记录渲染时的状态
-  const debugInfo = {
-    highlightIds: knowledgeState.highlightIds,
-    highlightIdsCount: knowledgeState.highlightIds.length,
-    highlightFilterActive: knowledgeState.highlightFilterActive,
-    itemsCount: knowledgeState.items.length,
-    filteredItemsCount: knowledgeState.filteredItems.length,
-    localStorageValue: typeof window !== 'undefined' && window.localStorage 
-      ? window.localStorage.getItem('latestExtractionHighlightIds') 
-      : 'N/A'
-  };
-  
-  console.log('[知识库] 开始渲染知识视图', debugInfo);
-  
-  // 在开发环境下显示调试信息（可通过 URL 参数 ?debug=1 启用）
-  const urlParams = new URLSearchParams(window.location.search);
-  const showDebug = urlParams.get('debug') === '1' || localStorage.getItem('knowledge-debug') === 'true';
-  
-  if (showDebug) {
-    // 移除旧的调试面板
-    const oldDebugPanel = document.getElementById('knowledge-debug-panel');
-    if (oldDebugPanel) {
-      oldDebugPanel.remove();
-    }
-    
-    // 创建新的调试面板
-    const debugPanel = document.createElement('div');
-    debugPanel.id = 'knowledge-debug-panel';
-    debugPanel.className = 'fixed bottom-4 right-4 bg-black/80 text-white text-xs p-3 rounded-lg z-50 max-w-md font-mono';
-    debugPanel.style.fontSize = '11px';
-    debugPanel.innerHTML = `
-      <div class="font-bold mb-2 text-yellow-400">🐛 知识库调试信息</div>
-      <div class="space-y-1">
-        <div><span class="text-gray-400">highlightIds:</span> <span class="text-green-400">${JSON.stringify(debugInfo.highlightIds)}</span></div>
-        <div><span class="text-gray-400">highlightIdsCount:</span> <span class="text-blue-400">${debugInfo.highlightIdsCount}</span></div>
-        <div><span class="text-gray-400">highlightFilterActive:</span> <span class="text-blue-400">${debugInfo.highlightFilterActive}</span></div>
-        <div><span class="text-gray-400">itemsCount:</span> <span class="text-blue-400">${debugInfo.itemsCount}</span></div>
-        <div><span class="text-gray-400">filteredItemsCount:</span> <span class="text-blue-400">${debugInfo.filteredItemsCount}</span></div>
-        <div><span class="text-gray-400">localStorage:</span> <span class="text-purple-400">${debugInfo.localStorageValue ? debugInfo.localStorageValue.substring(0, 100) + '...' : 'null'}</span></div>
-      </div>
-      <button onclick="localStorage.removeItem('knowledge-debug'); location.reload();" class="mt-2 px-2 py-1 bg-red-600 text-white rounded text-[10px]">关闭调试</button>
-    `;
-    document.body.appendChild(debugPanel);
   }
   
   // 性能监控
@@ -750,31 +639,8 @@ export function renderKnowledgeView() {
       otherItems = []; // 不显示其他项目
     } else if (highlightIds.length > 0) {
       // 正常模式：分离出本次新提取和其他项目
-      console.log('[知识库] 开始分离本次新提取的卡片', {
-        highlightIds,
-        highlightIdsCount: highlightIds.length,
-        highlightIdsTypes: highlightIds.map(id => typeof id),
-        filteredItemsCount: knowledgeState.filteredItems.length,
-        filteredItemIds: knowledgeState.filteredItems.map(item => ({
-          id: item.id,
-          idType: typeof item.id,
-          idAsString: String(item.id)
-        })).slice(0, 10) // 只显示前10个作为示例
-      });
-      
       // 确保 highlightIds 和 item.id 都是字符串类型进行比较
       const highlightSet = new Set(highlightIds);
-      console.log('[知识库] 创建 highlightSet', {
-        highlightSetSize: highlightSet.size,
-        highlightSetValues: Array.from(highlightSet)
-      });
-      
-      // 详细记录每个项目的匹配过程
-      const matchResults = knowledgeState.filteredItems.map(item => {
-        const itemId = String(item.id);
-        const isMatched = highlightSet.has(itemId);
-        return { itemId, itemIdOriginal: item.id, isMatched };
-      });
       
       latestItems = knowledgeState.filteredItems.filter(item => {
         const itemId = String(item.id);
@@ -785,35 +651,12 @@ export function renderKnowledgeView() {
         return !highlightSet.has(itemId);
       });
 
-      console.log('[知识库] 匹配结果统计', {
-        totalFilteredItems: knowledgeState.filteredItems.length,
-        matchedCount: latestItems.length,
-        unmatchedCount: otherItems.length,
-        matchResults: matchResults.slice(0, 10), // 只显示前10个
-        matchedIds: latestItems.map(item => String(item.id)),
-        unmatchedIds: otherItems.slice(0, 10).map(item => String(item.id)) // 只显示前10个
-      });
-
       // 按照highlightIds的顺序排序最新列表
       const orderMap = new Map(highlightIds.map((id, index) => [String(id), index]));
       latestItems.sort((a, b) => {
         const orderA = orderMap.get(String(a.id)) ?? 0;
         const orderB = orderMap.get(String(b.id)) ?? 0;
         return orderA - orderB;
-      });
-      
-      console.log('[知识库] ✅ 本次新提取区域准备完成', {
-        highlightIds,
-        latestItemsCount: latestItems.length,
-        latestItemIds: latestItems.map(item => String(item.id)),
-        latestItemTitles: latestItems.map(item => item.title).slice(0, 5),
-        otherItemsCount: otherItems.length,
-        willShowLatestSection: latestItems.length > 0
-      });
-    } else {
-      console.log('[知识库] 没有高亮ID，不显示本次新提取区域', {
-        highlightIds,
-        highlightIdsLength: highlightIds.length
       });
     }
 
@@ -922,26 +765,14 @@ export function renderKnowledgeView() {
       const clearBtn = latestSection.querySelector('#btn-clear-latest-highlight');
       if (clearBtn) {
         clearBtn.addEventListener('click', () => {
-          console.log('[知识库] 用户点击清除高亮按钮');
-          const oldHighlightIds = [...knowledgeState.highlightIds];
           knowledgeState.highlightIds = [];
           knowledgeState.highlightFilterActive = false;
           try {
             if (typeof window !== 'undefined' && window.localStorage) {
-              const storageKey = 'latestExtractionHighlightIds';
-              const beforeRemove = window.localStorage.getItem(storageKey);
-              window.localStorage.removeItem(storageKey);
-              const afterRemove = window.localStorage.getItem(storageKey);
-              console.log('[知识库] 清除 localStorage 高亮ID', {
-                storageKey,
-                beforeRemove,
-                afterRemove,
-                removeSuccess: afterRemove === null,
-                oldHighlightIds
-              });
+              window.localStorage.removeItem('latestExtractionHighlightIds');
             }
           } catch (e) {
-            console.error('[知识库] ❌ 清除本次提取高亮ID失败:', e);
+            console.error('清除本次提取高亮ID失败:', e);
           }
           applyFilters();
           renderKnowledgeView();
@@ -1180,70 +1011,26 @@ export function refreshHighlightIds() {
   const storageKey = 'latestExtractionHighlightIds';
   
   try {
-    console.log('[知识库] 开始读取 localStorage 中的高亮ID', {
-      hasWindow: typeof window !== 'undefined',
-      hasLocalStorage: typeof window !== 'undefined' && window.localStorage,
-      storageKey
-    });
-    
     if (typeof window !== 'undefined' && window.localStorage) {
       const stored = window.localStorage.getItem(storageKey);
-      console.log('[知识库] localStorage 原始值', {
-        stored,
-        storedType: typeof stored,
-        storedLength: stored ? stored.length : 0,
-        isNull: stored === null,
-        isEmpty: stored === ''
-      });
       
       if (stored) {
-        let ids;
         try {
-          ids = JSON.parse(stored);
-          console.log('[知识库] JSON 解析结果', {
-            ids,
-            idsType: typeof ids,
-            isArray: Array.isArray(ids),
-            idsLength: Array.isArray(ids) ? ids.length : 0
-          });
+          const ids = JSON.parse(stored);
+          
+          if (Array.isArray(ids) && ids.length > 0) {
+            // 统一将 ID 转换为字符串，确保类型一致
+            knowledgeState.highlightIds = ids.map(id => String(id));
+            return true; // 表示有新的高亮ID
+          }
         } catch (parseError) {
-          console.error('[知识库] JSON 解析失败', {
-            stored,
-            error: parseError
-          });
+          console.error('解析高亮ID失败:', parseError);
           return false;
         }
-        
-        if (Array.isArray(ids) && ids.length > 0) {
-          // 统一将 ID 转换为字符串，确保类型一致
-          const originalIds = [...ids];
-          knowledgeState.highlightIds = ids.map(id => String(id));
-          
-          console.log('[知识库] ✅ 成功读取并转换高亮ID', {
-            originalIds,
-            convertedIds: knowledgeState.highlightIds,
-            count: knowledgeState.highlightIds.length,
-            allAreStrings: knowledgeState.highlightIds.every(id => typeof id === 'string'),
-            sampleIds: knowledgeState.highlightIds.slice(0, 5)
-          });
-          
-          return true; // 表示有新的高亮ID
-        } else {
-          console.warn('[知识库] ⚠️ 解析后的数据不是有效数组', {
-            ids,
-            idsType: typeof ids,
-            isArray: Array.isArray(ids),
-            length: Array.isArray(ids) ? ids.length : 'N/A'
-          });
-        }
-      } else {
-        console.log('[知识库] localStorage 中没有存储的高亮ID');
       }
-    } else {
-      console.warn('[知识库] ⚠️ window 或 localStorage 不可用');
     }
   } catch (e) {
-    console.error('[知识库] ❌ 读取本次提取高亮ID失败:', e);
+    console.error('读取本次提取高亮ID失败:', e);
   }
   return false; // 没有新的高亮ID
 }
@@ -1252,22 +1039,13 @@ export function refreshHighlightIds() {
  * 刷新知识库视图（用于提取完成后更新显示）
  */
 export async function refreshKnowledgeView() {
-  console.log('[知识库] 开始刷新知识库视图');
-  
   // 先读取 highlightIds（确保在加载知识列表之前设置）
   const hasNewIds = refreshHighlightIds();
   
   if (hasNewIds) {
-    console.log('[知识库] 检测到新的高亮ID，重新加载知识列表');
     // 重新加载知识列表并渲染（loadKnowledgeItems 会调用 applyFilters 和 renderKnowledgeView）
     await loadKnowledgeItems();
-    
-    // 确保 highlightIds 已正确应用到筛选
-    console.log('[知识库] 知识列表加载完成，当前 highlightIds:', knowledgeState.highlightIds);
-    console.log('[知识库] 当前知识列表项数:', knowledgeState.items.length);
-    console.log('[知识库] 筛选后项数:', knowledgeState.filteredItems.length);
   } else {
-    console.log('[知识库] 没有新的高亮ID，仅重新渲染视图');
     // 即使没有新的高亮ID，也重新渲染一次（以防数据有更新）
     renderKnowledgeView();
   }
@@ -1277,23 +1055,8 @@ export async function refreshKnowledgeView() {
  * 初始化知识库视图
  */
 export async function initKnowledgeView() {
-  console.log('[知识库] 初始化知识库视图');
-  
-  // 检查是否启用调试模式
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('debug') === '1') {
-    localStorage.setItem('knowledge-debug', 'true');
-    console.log('[知识库] 🐛 调试模式已启用，调试面板将显示在页面右下角');
-  }
-  
   // 从 localStorage 中读取本次提取需要高亮的知识点ID
-  const hasHighlightIds = refreshHighlightIds();
-  if (hasHighlightIds) {
-    console.log('[知识库] 初始化时发现高亮ID:', knowledgeState.highlightIds);
-  }
-  
-  // 注意：不清除 localStorage 中的 highlightIds，让用户可以在提取完成后查看
-  // 只有在用户主动清除高亮或切换知识库时才清除
+  refreshHighlightIds();
 
   await loadKnowledgeItems();
   
@@ -1315,7 +1078,6 @@ export async function initKnowledgeView() {
   // 监听知识库切换事件，重新加载知识列表（只绑定一次，防止重复刷新）
   if (!knowledgeBaseChangedListenerBound) {
     const handleKnowledgeBaseChanged = async (event) => {
-      console.log('[知识库] 知识库已切换，重新加载知识列表');
       // 重置筛选和搜索状态，避免沿用上一个知识库的条件造成空列表误判
       knowledgeState.currentPage = 1;
       knowledgeState.currentFilter = 'all';
@@ -1323,26 +1085,14 @@ export async function initKnowledgeView() {
       knowledgeState.searchQuery = '';
       
       // 清除本次提取的高亮ID（切换知识库后，之前的提取结果不再相关）
-      const oldHighlightIds = [...knowledgeState.highlightIds];
       knowledgeState.highlightIds = [];
       knowledgeState.highlightFilterActive = false;
       try {
         if (typeof window !== 'undefined' && window.localStorage) {
-          const storageKey = 'latestExtractionHighlightIds';
-          const beforeRemove = window.localStorage.getItem(storageKey);
-          window.localStorage.removeItem(storageKey);
-          const afterRemove = window.localStorage.getItem(storageKey);
-          console.log('[知识库] 知识库切换时清除高亮ID', {
-            storageKey,
-            beforeRemove,
-            afterRemove,
-            removeSuccess: afterRemove === null,
-            oldHighlightIds,
-            newKnowledgeBaseId: event.detail?.knowledgeBaseId
-          });
+          window.localStorage.removeItem('latestExtractionHighlightIds');
         }
       } catch (e) {
-        console.error('[知识库] ❌ 清除高亮ID失败:', e);
+        console.error('清除高亮ID失败:', e);
       }
       
       // 重置筛选按钮和搜索输入框的UI状态

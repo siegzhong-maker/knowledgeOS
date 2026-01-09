@@ -71,17 +71,7 @@ function splitContentIntoChunks(content, chunkSize = 20000, overlap = 1000) {
  * @returns {Promise<Array>} 提取的知识点数组
  */
 async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = null, userApiKey = null) {
-  console.log('[提取] extractKnowledgeFromContent 开始', {
-    sourceItemId,
-    sourcePage,
-    contentLength: content ? content.length : 0,
-    hasUserApiKey: !!userApiKey,
-    userApiKeyPreview: userApiKey ? `${userApiKey.substring(0, 8)}...` : 'none',
-    contentPreview: content ? content.substring(0, 500) : 'null'
-  });
-  
   if (!content || content.trim().length === 0) {
-    console.warn('[提取] ⚠️ 内容为空，返回空数组', { sourceItemId });
     return [];
   }
 
@@ -132,12 +122,6 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
         removedLength
       });
       preprocessingLog.removedLength += removedLength;
-      console.log('[提取] 清理格式干扰', {
-        sourceItemId,
-        description,
-        removedLength,
-        remainingLength: cleanedContent.length
-      });
     }
   });
   
@@ -145,37 +129,11 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
   cleanedContent = cleanedContent.trim();
   preprocessingLog.finalLength = cleanedContent.length;
   
-  // 记录预处理结果
-  console.log('[提取] 内容预处理完成', {
-    sourceItemId,
-    originalLength,
-    cleanedLength: cleanedContent.length,
-    removedLength: preprocessingLog.removedLength,
-    removedPatterns: preprocessingLog.removedPatterns,
-    reductionPercent: originalLength > 0 
-      ? ((preprocessingLog.removedLength / originalLength) * 100).toFixed(2) + '%'
-      : '0%'
-  });
-  
   // 检查清理后的内容是否仍然有效
   const minContentLength = 100;
   if (cleanedContent.length < minContentLength) {
-    console.warn('[提取] ⚠️ 清理后内容过短，可能不适合提取', {
-      sourceItemId,
-      originalLength,
-      cleanedLength: cleanedContent.length,
-      minRequiredLength: minContentLength,
-      removedLength: preprocessingLog.removedLength,
-      contentPreview: cleanedContent.substring(0, 300),
-      recommendation: '文档内容可能主要是格式信息，缺少实际内容。建议检查原始文档。'
-    });
     // 如果清理后内容过短，但原始内容足够，说明清理过度，使用原始内容
     if (originalLength >= minContentLength) {
-      console.warn('[提取] ⚠️ 检测到清理过度，使用原始内容', {
-        sourceItemId,
-        originalLength,
-        cleanedLength: cleanedContent.length
-      });
       cleanedContent = content.trim();
       preprocessingLog = {
         removedPatterns: [],
@@ -202,40 +160,11 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
     );
   } else {
     // 内容过长，分块提取
-    console.log('[提取] 内容过长，开始分块提取', {
-      sourceItemId,
-      originalContentLength: content.length,
-      cleanedContentLength: cleanedContent.length,
-      chunkSize: CHUNK_SIZE,
-      chunkOverlap: CHUNK_OVERLAP,
-      estimatedChunks: Math.ceil(cleanedContent.length / (CHUNK_SIZE - CHUNK_OVERLAP))
-    });
-    
     const chunks = splitContentIntoChunks(cleanedContent, CHUNK_SIZE, CHUNK_OVERLAP);
-    console.log('[提取] 内容分块完成', {
-      sourceItemId,
-      totalChunks: chunks.length,
-      chunks: chunks.map((chunk, index) => ({
-        index,
-        length: chunk.text.length,
-        startIndex: chunk.startIndex,
-        endIndex: chunk.endIndex,
-        preview: chunk.text.substring(0, 100)
-      }))
-    });
     
     // 逐个处理每个块
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      console.log('[提取] 处理内容块', {
-        sourceItemId,
-        chunkIndex: i + 1,
-        totalChunks: chunks.length,
-        chunkLength: chunk.text.length,
-        chunkStart: chunk.startIndex,
-        chunkEnd: chunk.endIndex,
-        progress: `${i + 1}/${chunks.length}`
-      });
       
       try {
         const chunkKnowledgeItems = await extractKnowledgeFromChunk(
@@ -246,15 +175,6 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
           sourcePage
         );
         
-        console.log('[提取] 块提取完成', {
-          sourceItemId,
-          chunkIndex: i + 1,
-          totalChunks: chunks.length,
-          extractedCount: chunkKnowledgeItems.length,
-          totalExtractedSoFar: allKnowledgeItems.length + chunkKnowledgeItems.length,
-          progress: `${i + 1}/${chunks.length}`
-        });
-        
         allKnowledgeItems = allKnowledgeItems.concat(chunkKnowledgeItems);
         
         // 块之间稍作延迟，避免API频率限制
@@ -262,29 +182,11 @@ async function extractKnowledgeFromContent(content, sourceItemId, sourcePage = n
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (chunkError) {
-        console.error('[提取] ❌ 块提取失败', {
-          sourceItemId,
-          chunkIndex: i + 1,
-          totalChunks: chunks.length,
-          error: chunkError.message,
-          errorName: chunkError.name,
-          chunkLength: chunk.text.length,
-          isTimeout: chunkError.message.includes('timeout') || chunkError.message.includes('超时')
-        });
+        console.error(`块提取失败 (sourceItemId: ${sourceItemId}, chunk: ${i + 1}/${chunks.length}):`, chunkError.message);
         // 某个块失败，继续处理其他块
         // 不中断整个提取过程
       }
     }
-    
-    console.log('[提取] 所有块处理完成', {
-      sourceItemId,
-      totalChunks: chunks.length,
-      totalExtractedCount: allKnowledgeItems.length,
-      averagePerChunk: chunks.length > 0 ? (allKnowledgeItems.length / chunks.length).toFixed(1) : 0,
-      recommendation: allKnowledgeItems.length === 0 
-        ? '所有块提取都未生成知识点，请检查文档内容或查看详细日志' 
-        : `成功从 ${chunks.length} 个块中提取 ${allKnowledgeItems.length} 个知识点`
-    });
   }
   
   return allKnowledgeItems;
@@ -424,41 +326,16 @@ async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex,
       throw new Error('AI API返回空响应');
     }
     
-    console.log('[提取] AI API 调用成功（块）', {
-      sourceItemId,
-      chunkIndex,
-      responseLength: response ? response.length : 0,
-      responsePreview: response ? response.substring(0, 500) : 'null',
-      fullResponse: response ? response.substring(0, 3000) : 'null' // 记录前3000字符用于调试
-    });
-
     // 尝试解析JSON响应
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       let jsonString = jsonMatch[0];
-      console.log('[提取] 找到JSON数组（块）', {
-        sourceItemId,
-        chunkIndex,
-        jsonStringLength: jsonString.length,
-        jsonPreview: jsonString.substring(0, 300)
-      });
       
       // 尝试解析JSON，如果失败则尝试修复
       let knowledgeItems;
       try {
         knowledgeItems = JSON.parse(jsonString);
-        console.log('[提取] ✅ JSON解析成功（块）', {
-          sourceItemId,
-          chunkIndex,
-          knowledgeItemsCount: Array.isArray(knowledgeItems) ? knowledgeItems.length : 0,
-          isArray: Array.isArray(knowledgeItems)
-        });
       } catch (parseError) {
-        console.warn('[提取] ⚠️ 首次JSON解析失败，尝试修复', {
-          sourceItemId,
-          error: parseError.message,
-          jsonStringLength: jsonString.length
-        });
         // 如果解析失败，尝试修复常见的JSON问题
         try {
           // 方法1：清理字符串值外的控制字符（在JSON结构中的换行、制表等）
@@ -574,22 +451,6 @@ async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex,
         const contentLength = item.content ? item.content.length : 0;
         const isValid = hasTitle && hasContent;
         
-        if (!isValid) {
-          console.warn('[提取] ⚠️ 知识点验证失败（块）', {
-            sourceItemId,
-            chunkIndex,
-            index,
-            hasTitle,
-            hasContent,
-            titleLength,
-            contentLength,
-            itemPreview: {
-              title: item.title ? item.title.substring(0, 50) : 'null',
-              content: item.content ? item.content.substring(0, 100) : 'null'
-            }
-          });
-        }
-        
         return {
           index,
           hasTitle,
@@ -603,32 +464,6 @@ async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex,
       const filtered = knowledgeItems.filter(item => item.title && item.content);
       const afterFilter = filtered.length;
       
-      console.log('[提取] 数据验证和清洗（块）', {
-        sourceItemId,
-        chunkIndex,
-        beforeFilter,
-        afterFilter,
-        filteredOut: beforeFilter - afterFilter,
-        validationDetails,
-        invalidItems: validationDetails.filter(v => !v.isValid).map(v => ({
-          index: v.index,
-          reason: !v.hasTitle ? '缺少标题' : !v.hasContent ? '缺少内容' : '未知'
-        }))
-      });
-      
-      if (afterFilter === 0 && beforeFilter > 0) {
-        console.error('[提取] ❌ 所有知识点都被过滤掉', {
-          sourceItemId,
-          originalCount: beforeFilter,
-          filteredCount: afterFilter,
-          reasons: validationDetails.map(v => ({
-            index: v.index,
-            hasTitle: v.hasTitle,
-            hasContent: v.hasContent
-          }))
-        });
-      }
-      
       const cleaned = filtered.map(item => ({
         title: item.title.trim(),
         content: item.content.trim(),
@@ -640,38 +475,6 @@ async function extractKnowledgeFromChunk(contentChunk, sourceItemId, chunkIndex,
         sourceItemId,
         sourcePage
       }));
-      
-      console.log('[提取] ✅ 提取完成', {
-        sourceItemId,
-        extractedCount: cleaned.length,
-        sampleTitles: cleaned.slice(0, 3).map(item => item.title),
-        allTitles: cleaned.map(item => item.title?.substring(0, 50))
-      });
-      
-      // 如果清理后没有知识点，记录诊断信息
-      if (cleaned.length === 0) {
-        console.warn('[提取] ⚠️ 提取完成但未生成任何知识点（块）', {
-          sourceItemId,
-          chunkIndex,
-          chunkLength: cleanedChunk.length,
-          sampleLength: contentSample.length,
-          contentPreview: cleanedChunk.substring(0, 500),
-          possibleReasons: [
-            '当前块内容可能主要是格式信息或免责声明',
-            '内容块可能太短或质量不高',
-            'AI可能判断当前块不适合提取知识点',
-            '内容块可能不包含可提取的知识点'
-          ],
-          recommendation: '继续处理其他块，或检查原始文档内容'
-        });
-      }
-      
-      console.log('[提取] ✅ 块提取完成', {
-        sourceItemId,
-        chunkIndex,
-        extractedCount: cleaned.length,
-        sampleTitles: cleaned.slice(0, 3).map(item => item.title)
-      });
       
       return cleaned;
     }

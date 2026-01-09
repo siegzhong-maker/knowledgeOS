@@ -64,14 +64,6 @@ function calculateETA(progressHistory, currentProgress, startTime) {
 router.post('/extract', async (req, res) => {
   try {
     const { itemIds, knowledgeBaseId, extractionOptions = {}, userApiKey } = req.body;
-    
-    // 调试：记录 API Key 状态
-    console.log('[提取API] 接收提取请求', {
-      itemIdsCount: itemIds?.length || 0,
-      knowledgeBaseId,
-      hasUserApiKey: !!userApiKey,
-      userApiKeyPreview: userApiKey ? `${userApiKey.substring(0, 8)}...` : 'none'
-    });
 
     if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
       return res.status(400).json({
@@ -153,18 +145,6 @@ router.post('/extract', async (req, res) => {
           }
         }
         
-        // 调试日志：只在 knowledgeItemIds 发生变化时记录
-        if (progress.knowledgeItemIds !== undefined && 
-            JSON.stringify(mergedKnowledgeItemIds) !== JSON.stringify(currentTask.knowledgeItemIds || [])) {
-          console.log('[后端] 进度更新：knowledgeItemIds 已更新', {
-            extractionId,
-            stage: progress.stage,
-            oldCount: (currentTask.knowledgeItemIds || []).length,
-            newCount: mergedKnowledgeItemIds.length,
-            extractedCount: progress.extractedCount || currentTask.extractedCount
-          });
-        }
-        
         extractionTasks.set(extractionId, updatedTask);
       }
     };
@@ -176,20 +156,6 @@ router.post('/extract', async (req, res) => {
       updateProgress,
       ...extractionOptions
     }).then(result => {
-      console.log('[后端] 提取任务完成', {
-        extractionId,
-        totalItems: result.totalItems,
-        processedItems: result.processedItems,
-        extractedCount: result.extractedCount,
-        knowledgeItemIds: result.knowledgeItemIds || [],
-        knowledgeItemIdsLength: result.knowledgeItemIds ? result.knowledgeItemIds.length : 0,
-        knowledgeItemsLength: result.knowledgeItems ? result.knowledgeItems.length : 0,
-        environment: {
-          nodeEnv: process.env.NODE_ENV,
-          isRailway: !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID)
-        }
-      });
-      
       // 获取当前任务状态（可能包含进度更新中的 knowledgeItemIds）
       const currentTask = extractionTasks.get(extractionId);
       const finalKnowledgeItemIds = result.knowledgeItemIds && result.knowledgeItemIds.length > 0
@@ -198,16 +164,6 @@ router.post('/extract', async (req, res) => {
       const finalKnowledgeItems = result.knowledgeItems && result.knowledgeItems.length > 0
         ? result.knowledgeItems
         : (currentTask?.knowledgeItems || []);
-      
-      console.log('[后端] 最终合并任务状态', {
-        extractionId,
-        resultKnowledgeItemIds: result.knowledgeItemIds?.length || 0,
-        currentTaskKnowledgeItemIds: currentTask?.knowledgeItemIds?.length || 0,
-        finalKnowledgeItemIds: finalKnowledgeItemIds.length,
-        resultKnowledgeItems: result.knowledgeItems?.length || 0,
-        currentTaskKnowledgeItems: currentTask?.knowledgeItems?.length || 0,
-        finalKnowledgeItems: finalKnowledgeItems.length
-      });
       
       // 确保状态被正确设置为 'completed'，即使没有知识点
       extractionTasks.set(extractionId, {
@@ -223,61 +179,12 @@ router.post('/extract', async (req, res) => {
         progress: 100 // 确保进度为100%
       });
       
-      // 验证结果
+      // 只在提取失败时记录警告
       if (!finalKnowledgeItemIds || finalKnowledgeItemIds.length === 0) {
-        console.warn('[后端] ⚠️ 提取完成但没有知识点ID', {
-          extractionId,
-          extractedCount: result.extractedCount,
-          knowledgeItemsLength: finalKnowledgeItems.length,
-          resultKnowledgeItemIds: result.knowledgeItemIds?.length || 0,
-          currentTaskKnowledgeItemIds: currentTask?.knowledgeItemIds?.length || 0,
-          possibleCauses: [
-            'AI未返回知识点数据',
-            '知识点保存失败',
-            'ID收集逻辑有问题',
-            '数据库插入失败但未抛出错误'
-          ],
-          recommendations: [
-            '检查Railway日志中的[提取]和[保存]相关错误',
-            '访问 /api/diagnose/extraction 查看详细诊断信息',
-            '确认API Key已正确配置',
-            '确认数据库表结构正确'
-          ]
-        });
-      } else {
-        console.log('[后端] ✅ 提取完成，已保存知识点ID', {
-          extractionId,
-          knowledgeItemIdsCount: finalKnowledgeItemIds.length,
-          extractedCount: result.extractedCount
-        });
+        console.warn(`提取完成但未生成知识点 (extractionId: ${extractionId})`);
       }
     }).catch(error => {
-      // 增强错误日志，特别针对Railway环境
-      const errorDetails = {
-        extractionId,
-        error: error.message,
-        errorStack: error.stack,
-        errorName: error.name,
-        environment: {
-          nodeEnv: process.env.NODE_ENV,
-          isRailway: !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID),
-          hasDatabaseUrl: !!process.env.DATABASE_URL
-        },
-        possibleCauses: {
-          apiKey: error.message.includes('API Key') ? 'API Key未配置或无效' : null,
-          network: error.message.includes('网络') || error.message.includes('timeout') ? '网络连接问题' : null,
-          database: error.message.includes('数据库') || error.message.includes('table') ? '数据库问题' : null,
-          ai: error.message.includes('AI') || error.message.includes('DeepSeek') ? 'AI调用失败' : null
-        },
-        recommendations: [
-          '查看Railway日志获取详细错误信息',
-          '访问 /api/diagnose/extraction 进行诊断',
-          '检查API Key配置',
-          '检查数据库连接和表结构'
-        ]
-      };
-      
-      console.error('[后端] ❌ 提取任务失败', errorDetails);
+      console.error(`提取任务失败 (extractionId: ${extractionId}):`, error.message);
       
       extractionTasks.set(extractionId, {
         status: 'failed',
@@ -329,62 +236,17 @@ router.get('/extract/:extractionId/status', async (req, res) => {
 
     // 如果已完成，获取知识点详情
     let knowledgeItems = [];
-    console.log('[后端] 提取任务状态检查', {
-      extractionId,
-      status: task.status,
-      knowledgeItemIds: task.knowledgeItemIds || [],
-      knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
-      knowledgeItemIdsType: Array.isArray(task.knowledgeItemIds) ? 'array' : typeof task.knowledgeItemIds,
-      knowledgeItems: task.knowledgeItems || [],
-      knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0
-    });
     
     if (task.status === 'completed' && task.knowledgeItemIds.length > 0) {
-      console.log('[后端] 任务已完成，从数据库获取知识点详情', {
-        knowledgeItemIds: task.knowledgeItemIds,
-        count: task.knowledgeItemIds.length
-      });
       const placeholders = task.knowledgeItemIds.map(() => '?').join(',');
       knowledgeItems = await db.all(
         `SELECT id, title, content FROM personal_knowledge_items WHERE id IN (${placeholders})`,
         task.knowledgeItemIds
       );
-      console.log('[后端] 从数据库获取到的知识点', {
-        requestedIds: task.knowledgeItemIds,
-        foundItems: knowledgeItems.length,
-        foundIds: knowledgeItems.map(item => item.id)
-      });
     } else if (task.knowledgeItems && task.knowledgeItems.length > 0) {
-      console.log('[后端] 使用任务中的 knowledgeItems', {
-        count: task.knowledgeItems.length
-      });
       knowledgeItems = task.knowledgeItems;
-    } else {
-      // 任务完成但没有知识点数据，记录详细信息用于调试
-      console.warn('[后端] ⚠️ 任务已完成但没有知识点数据', {
-        status: task.status,
-        extractionId,
-        hasKnowledgeItemIds: !!task.knowledgeItemIds,
-        knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
-        hasKnowledgeItems: !!task.knowledgeItems,
-        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0,
-        extractedCount: task.extractedCount || 0,
-        totalItems: task.totalItems || 0,
-        processedItems: task.processedItems || 0,
-        error: task.error || null,
-        possibleCauses: [
-          task.extractedCount === 0 ? 'AI未返回知识点数据或提取失败' : null,
-          task.error ? `提取过程出错: ${task.error}` : null,
-          '数据保存失败',
-          'JSON解析失败'
-        ].filter(Boolean),
-        recommendations: [
-          '查看Railway日志中的[提取]和[保存]相关错误',
-          '检查AI调用是否成功',
-          '检查数据库表结构是否正确',
-          '尝试提取其他文档'
-        ]
-      });
+    } else if (task.status === 'completed') {
+      console.warn(`任务完成但未生成知识点数据 (extractionId: ${extractionId})`);
     }
 
     // 计算进度百分比（优先使用任务中的progress，否则计算）
@@ -411,29 +273,6 @@ router.get('/extract/:extractionId/status', async (req, res) => {
       progress: progress,
       etaSeconds: etaSeconds
     };
-    
-    // 如果任务完成但没有知识点，添加调试信息
-    if (task.status === 'completed' && (task.extractedCount === 0 || (task.knowledgeItemIds && task.knowledgeItemIds.length === 0))) {
-      responseData.debugInfo = {
-        hasError: !!task.error,
-        error: task.error || null,
-        hasKnowledgeItemIds: !!task.knowledgeItemIds,
-        knowledgeItemIdsLength: task.knowledgeItemIds ? task.knowledgeItemIds.length : 0,
-        hasKnowledgeItems: !!task.knowledgeItems,
-        knowledgeItemsLength: task.knowledgeItems ? task.knowledgeItems.length : 0,
-        recommendation: '查看Railway日志中的[提取]和[保存]相关错误，或访问 /api/diagnose/extraction 查看详细诊断'
-      };
-    }
-    
-    console.log('[后端] 返回提取状态响应', {
-      extractionId,
-      status: responseData.status,
-      knowledgeItemIds: responseData.knowledgeItemIds,
-      knowledgeItemIdsLength: responseData.knowledgeItemIds.length,
-      knowledgeItemIdsType: Array.isArray(responseData.knowledgeItemIds) ? 'array' : typeof responseData.knowledgeItemIds,
-      knowledgeItemsLength: responseData.knowledgeItems.length,
-      extractedCount: responseData.extractedCount
-    });
     
     res.json({
       success: true,
@@ -492,9 +331,10 @@ router.get('/items', async (req, res) => {
     }
 
     if (search) {
-      sql += ' AND (title LIKE ? OR content LIKE ?)';
+      // 只搜索标题，避免大文本字段全表扫描
+      sql += ' AND title LIKE ?';
       const searchTerm = `%${search}%`;
-      params.push(searchTerm, searchTerm);
+      params.push(searchTerm);
     }
 
     // 获取总数（在 JOIN 之前，使用原始表名）

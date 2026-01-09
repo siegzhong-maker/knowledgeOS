@@ -11,8 +11,6 @@ router.get('/', async (req, res) => {
   try {
     const { type, status, search, page = 1, limit = 50, knowledge_base_id } = req.query;
     
-    console.log('[Items API] 查询参数:', { type, status, search, page, limit, knowledge_base_id });
-    
     // 优化：列表查询只返回必要字段，排除大文本字段（raw_content, page_content）
     // 这些字段只在查看详情时加载
     let sql = `SELECT id, type, title, original_url, summary_ai, source, tags, 
@@ -45,9 +43,10 @@ router.get('/', async (req, res) => {
     }
 
     if (search) {
-      sql += ' AND (title LIKE ? OR raw_content LIKE ? OR summary_ai LIKE ?)';
+      // 只搜索已索引的字段，避免大文本字段全表扫描
+      sql += ' AND (title LIKE ? OR summary_ai LIKE ?)';
       const searchTerm = `%${search}%`;
-      params.push(searchTerm, searchTerm, searchTerm);
+      params.push(searchTerm, searchTerm);
     }
 
     // 获取总数（在应用ORDER BY和LIMIT之前）
@@ -58,13 +57,8 @@ router.get('/', async (req, res) => {
 
     sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
-
-    console.log('[Items API] 执行SQL:', sql);
-    console.log('[Items API] 参数:', params);
     
     const items = await db.all(sql, params);
-    
-    console.log(`[Items API] 查询到 ${items.length} 条记录，总数: ${total}`);
 
     // 解析tags JSON（不再解析page_content，因为列表查询不返回该字段）
     const itemsWithParsedTags = items.map(item => {
@@ -268,9 +262,7 @@ router.post('/:id/restore', async (req, res) => {
 // 永久删除知识项（硬删除，必须在 /:id 之前）
 router.delete('/:id/permanent', async (req, res) => {
   try {
-    console.log('永久删除请求:', req.params.id);
-    const result = await db.run('DELETE FROM source_items WHERE id = ?', [req.params.id]);
-    console.log('永久删除成功:', result);
+    await db.run('DELETE FROM source_items WHERE id = ?', [req.params.id]);
     res.json({ success: true, message: '已永久删除' });
   } catch (error) {
     console.error('永久删除知识项失败:', error);

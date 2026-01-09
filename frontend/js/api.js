@@ -89,7 +89,6 @@ async function apiRequest(endpoint, options = {}) {
       } else {
         // 如果不是JSON，读取文本内容
         const text = await response.text();
-        console.error('非JSON响应:', text.substring(0, 200));
         
         // 尝试解析为JSON（可能服务器返回了错误但格式不对）
         try {
@@ -97,7 +96,7 @@ async function apiRequest(endpoint, options = {}) {
         } catch (e) {
           // 如果解析失败，返回友好的错误信息
           if (response.status === 404) {
-            throw new Error('请求的资源不存在，请检查API端点是否正确');
+            throw new Error('请求的资源不存在');
           } else if (response.status === 500) {
             throw new Error('服务器内部错误，请稍后重试');
           } else {
