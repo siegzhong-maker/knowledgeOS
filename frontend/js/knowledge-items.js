@@ -121,17 +121,31 @@ export async function loadKnowledgeItems(filters = {}) {
  */
 async function handleBatchConfirm() {
   try {
-    // 获取当前列表中所有 pending 状态的知识点ID
-    const pendingItems = knowledgeState.filteredItems.filter(item => item.status === 'pending');
-    
-    if (pendingItems.length === 0) {
+    // 获取当前知识库ID
+    let currentKnowledgeBaseId = null;
+    try {
+      const { getCurrentKnowledgeBaseId } = await import('./knowledge-bases.js');
+      currentKnowledgeBaseId = getCurrentKnowledgeBaseId();
+    } catch (e) {
+      console.warn('无法获取当前知识库ID:', e);
+    }
+
+    // 调用 API 获取所有待确认的知识点（不仅仅是当前页）
+    const response = await knowledgeAPI.getItems({
+      status: 'pending',
+      knowledgeBaseId: currentKnowledgeBaseId,
+      limit: 10000, // 设置一个足够大的 limit 来获取所有待确认项
+      page: 1
+    });
+
+    if (!response.success || !response.data || response.data.length === 0) {
       if (window.showToast) {
         window.showToast('没有待确认的知识点', 'info');
       }
       return;
     }
 
-    const ids = pendingItems.map(item => item.id);
+    const ids = response.data.map(item => item.id);
     
     // 显示确认对话框
     let confirmed;
@@ -167,12 +181,12 @@ async function handleBatchConfirm() {
     }
 
     // 调用批量确认API
-    const response = await knowledgeAPI.batchConfirm(ids);
+    const confirmResponse = await knowledgeAPI.batchConfirm(ids);
     
-    if (response.success) {
+    if (confirmResponse.success) {
       // 显示成功提示
       if (window.showToast) {
-        window.showToast(`成功确认 ${response.count || ids.length} 个知识点`, 'success');
+        window.showToast(`成功确认 ${confirmResponse.count || ids.length} 个知识点`, 'success');
       }
       
       // 清除API缓存，确保获取最新数据
@@ -184,7 +198,7 @@ async function handleBatchConfirm() {
     } else {
       // 显示失败提示
       if (window.showToast) {
-        window.showToast(response.message || '批量确认失败', 'error');
+        window.showToast(confirmResponse.message || '批量确认失败', 'error');
       }
       
       // 恢复按钮状态
@@ -214,11 +228,34 @@ async function handleBatchConfirm() {
     const batchConfirmBtn = document.getElementById('btn-batch-confirm-all');
     if (batchConfirmBtn) {
       batchConfirmBtn.disabled = false;
-      const pendingCount = knowledgeState.filteredItems.filter(item => item.status === 'pending').length;
-      batchConfirmBtn.innerHTML = `
-        <i data-lucide="check-circle-2" size="16"></i>
-        <span>批量确认全部 (${pendingCount})</span>
-      `;
+      // 尝试重新获取待确认项数量，如果失败则使用当前显示的数量
+      try {
+        let currentKnowledgeBaseId = null;
+        try {
+          const { getCurrentKnowledgeBaseId } = await import('./knowledge-bases.js');
+          currentKnowledgeBaseId = getCurrentKnowledgeBaseId();
+        } catch (e) {
+          // 忽略获取知识库ID的错误
+        }
+        const response = await knowledgeAPI.getItems({
+          status: 'pending',
+          knowledgeBaseId: currentKnowledgeBaseId,
+          limit: 10000,
+          page: 1
+        });
+        const pendingCount = response.success && response.data ? response.data.length : knowledgeState.filteredItems.filter(item => item.status === 'pending').length;
+        batchConfirmBtn.innerHTML = `
+          <i data-lucide="check-circle-2" size="16"></i>
+          <span>批量确认全部 (${pendingCount})</span>
+        `;
+      } catch (e) {
+        // 如果获取失败，使用当前显示的数量作为后备
+        const pendingCount = knowledgeState.filteredItems.filter(item => item.status === 'pending').length;
+        batchConfirmBtn.innerHTML = `
+          <i data-lucide="check-circle-2" size="16"></i>
+          <span>批量确认全部 (${pendingCount})</span>
+        `;
+      }
       if (window.lucide) {
         window.lucide.createIcons(batchConfirmBtn);
       }
@@ -663,7 +700,7 @@ export function renderKnowledgeView() {
           ${isFiltered 
             ? '尝试调整搜索条件或筛选器，或清除筛选查看全部内容' 
             : isEmpty
-              ? '从文档库提取知识卡片，或手动创建知识点开始构建你的知识库'
+              ? '从文档库提取知识卡片开始构建你的知识库'
               : '当前筛选条件下没有知识点'}
         </p>
         <div class="flex items-center gap-3">
@@ -674,13 +711,6 @@ export function renderKnowledgeView() {
             >
               <i data-lucide="file-text" size="16"></i>
               <span>去文档库提取知识</span>
-            </button>
-            <button 
-              id="btn-create-knowledge"
-              class="px-6 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-lg font-medium hover:bg-slate-50 transition-colors flex items-center gap-2"
-            >
-              <i data-lucide="plus-circle" size="16"></i>
-              <span>手动创建</span>
             </button>
           ` : `
             <button 
@@ -703,16 +733,6 @@ export function renderKnowledgeView() {
           window.switchView('repository');
         } else {
           console.error('switchView函数未定义');
-        }
-      });
-    }
-    
-    const createBtn = container.querySelector('#btn-create-knowledge');
-    if (createBtn) {
-      createBtn.addEventListener('click', () => {
-        // TODO: 实现手动创建知识点功能
-        if (window.showToast) {
-          window.showToast('手动创建功能开发中', 'info');
         }
       });
     }
