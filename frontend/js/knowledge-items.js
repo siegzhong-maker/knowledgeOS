@@ -115,6 +115,93 @@ export async function loadKnowledgeItems(filters = {}) {
 }
 
 /**
+ * 批量确认所有待确认的知识点
+ */
+async function handleBatchConfirm() {
+  try {
+    // 获取当前列表中所有 pending 状态的知识点ID
+    const pendingItems = knowledgeState.filteredItems.filter(item => item.status === 'pending');
+    
+    if (pendingItems.length === 0) {
+      if (window.showToast) {
+        window.showToast('没有待确认的知识点', 'info');
+      }
+      return;
+    }
+
+    const ids = pendingItems.map(item => item.id);
+    
+    // 显示确认对话框
+    const confirmed = confirm(`确定要批量确认 ${ids.length} 个待确认的知识点吗？`);
+    if (!confirmed) {
+      return;
+    }
+
+    // 显示加载状态
+    const batchConfirmBtn = document.getElementById('btn-batch-confirm-all');
+    if (batchConfirmBtn) {
+      batchConfirmBtn.disabled = true;
+      batchConfirmBtn.innerHTML = `
+        <i data-lucide="loader-2" size="16" class="animate-spin"></i>
+        <span>确认中...</span>
+      `;
+      if (window.lucide) {
+        window.lucide.createIcons(batchConfirmBtn);
+      }
+    }
+
+    // 调用批量确认API
+    const response = await knowledgeAPI.batchConfirm(ids);
+    
+    if (response.success) {
+      // 显示成功提示
+      if (window.showToast) {
+        window.showToast(`成功确认 ${response.count || ids.length} 个知识点`, 'success');
+      }
+      
+      // 重新加载知识列表
+      await loadKnowledgeItems();
+    } else {
+      // 显示失败提示
+      if (window.showToast) {
+        window.showToast(response.message || '批量确认失败', 'error');
+      }
+      
+      // 恢复按钮状态
+      if (batchConfirmBtn) {
+        batchConfirmBtn.disabled = false;
+        batchConfirmBtn.innerHTML = `
+          <i data-lucide="check-circle-2" size="16"></i>
+          <span>批量确认全部 (${ids.length})</span>
+        `;
+        if (window.lucide) {
+          window.lucide.createIcons(batchConfirmBtn);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('批量确认失败:', error);
+    if (window.showToast) {
+      window.showToast('批量确认失败: ' + (error.message || '未知错误'), 'error');
+    }
+    
+    // 恢复按钮状态
+    const batchConfirmBtn = document.getElementById('btn-batch-confirm-all');
+    if (batchConfirmBtn) {
+      batchConfirmBtn.disabled = false;
+      const pendingCount = knowledgeState.filteredItems.filter(item => item.status === 'pending').length;
+      batchConfirmBtn.innerHTML = `
+        <i data-lucide="check-circle-2" size="16"></i>
+        <span>批量确认全部 (${pendingCount})</span>
+      `;
+      if (window.lucide) {
+        window.lucide.createIcons(batchConfirmBtn);
+      }
+    }
+  }
+}
+
+/**
  * 根据标签获取分类（与后端逻辑一致）
  */
 function getCategoryFromTags(tags) {
@@ -465,20 +552,43 @@ export function renderKnowledgeView() {
 
   // K1: 如果当前筛选是"待确认"，显示提示信息
   if (knowledgeState.currentFilter === 'pending') {
+    const pendingCount = knowledgeState.filteredItems.filter(item => item.status === 'pending').length;
     const pendingNotice = document.createElement('div');
-    pendingNotice.className = 'mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3';
+    pendingNotice.className = 'mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4';
     pendingNotice.innerHTML = `
-      <i data-lucide="alert-circle" size="20" class="text-amber-600 flex-shrink-0 mt-0.5"></i>
-      <div class="flex-1">
-        <p class="text-sm text-amber-800 font-medium">当前仅显示待人工确认的知识卡片</p>
-        <p class="text-xs text-amber-600 mt-1">这些卡片需要您检查并确认后才能用于智能问答</p>
+      <div class="flex items-start gap-3 mb-3">
+        <i data-lucide="alert-circle" size="20" class="text-amber-600 flex-shrink-0 mt-0.5"></i>
+        <div class="flex-1">
+          <p class="text-sm text-amber-800 font-medium">当前仅显示待人工确认的知识卡片</p>
+          <p class="text-xs text-amber-600 mt-1">这些卡片需要您检查并确认后才能用于智能问答</p>
+          ${pendingCount > 0 ? `<p class="text-xs text-amber-700 mt-1 font-medium">共有 ${pendingCount} 条待确认的知识点</p>` : ''}
+        </div>
       </div>
+      ${pendingCount > 0 ? `
+        <div class="flex justify-end">
+          <button
+            id="btn-batch-confirm-all"
+            class="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors shadow-sm hover:shadow-md flex items-center gap-2"
+          >
+            <i data-lucide="check-circle-2" size="16"></i>
+            <span>批量确认全部 (${pendingCount})</span>
+          </button>
+        </div>
+      ` : ''}
     `;
     container.appendChild(pendingNotice);
     
     // 初始化图标
     if (window.lucide) {
       window.lucide.createIcons(pendingNotice);
+    }
+
+    // 绑定批量确认按钮
+    if (pendingCount > 0) {
+      const batchConfirmBtn = pendingNotice.querySelector('#btn-batch-confirm-all');
+      if (batchConfirmBtn) {
+        batchConfirmBtn.addEventListener('click', handleBatchConfirm);
+      }
     }
   }
 

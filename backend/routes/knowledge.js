@@ -734,6 +734,47 @@ router.put('/items/:id', async (req, res) => {
 });
 
 /**
+ * 批量确认知识点API
+ * POST /api/knowledge/items/batch-confirm
+ */
+router.post('/items/batch-confirm', async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: '知识点ID列表不能为空'
+      });
+    }
+
+    // 批量更新知识点状态为 confirmed
+    const placeholders = ids.map(() => '?').join(',');
+    const now = Date.now();
+    
+    // 使用 IN 子句批量更新
+    const result = await db.run(
+      `UPDATE personal_knowledge_items 
+       SET status = ?, updated_at = ? 
+       WHERE id IN (${placeholders}) AND status = ?`,
+      ['confirmed', now, ...ids, 'pending']
+    );
+
+    res.json({
+      success: true,
+      message: `成功确认 ${result.changes || 0} 个知识点`,
+      count: result.changes || 0
+    });
+  } catch (error) {
+    console.error('批量确认知识点失败:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || '批量确认知识点失败'
+    });
+  }
+});
+
+/**
  * 删除知识点API
  * DELETE /api/knowledge/items/:id
  */

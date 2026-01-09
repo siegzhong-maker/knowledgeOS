@@ -529,6 +529,14 @@ export const knowledgeAPI = {
     });
   },
   
+  // 批量确认知识点
+  batchConfirm: (ids) => {
+    return apiRequest('/knowledge/items/batch-confirm', {
+      method: 'POST',
+      body: { ids }
+    });
+  },
+  
   // 删除知识点
   deleteItem: (id) => {
     return apiRequest(`/knowledge/items/${id}`, {
