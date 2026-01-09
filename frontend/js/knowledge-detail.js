@@ -1107,10 +1107,10 @@ async function saveKnowledgeItem(itemId = null) {
         const { clearAPICache } = await import('./api.js');
         clearAPICache();
         
-        const { loadKnowledgeItems, getKnowledgeState, renderKnowledgeView } = await import('./knowledge-items.js');
+        const { loadKnowledgeItems, getKnowledgeState } = await import('./knowledge-items.js');
         const state = getKnowledgeState();
         
-        // 更新列表中对应项的数据（立即更新UI）
+        // 更新列表中对应项的数据（立即更新UI，避免闪烁）
         const itemIndex = state.items.findIndex(item => item.id === currentItem.id);
         if (itemIndex !== -1) {
           // 合并更新后的数据
@@ -1123,29 +1123,26 @@ async function saveKnowledgeItem(itemId = null) {
             title: response.data.title || state.items[itemIndex].title
           };
         }
-        const filteredIndex = state.filteredItems.findIndex(item => item.id === currentItem.id);
-        if (filteredIndex !== -1) {
-          // 合并更新后的数据
-          state.filteredItems[filteredIndex] = { 
-            ...state.filteredItems[filteredIndex], 
-            ...response.data,
-            category: response.data.category || state.filteredItems[filteredIndex].category,
-            subcategory_id: response.data.subcategory_id !== undefined ? response.data.subcategory_id : state.filteredItems[filteredIndex].subcategory_id,
-            subcategory: response.data.subcategory || state.filteredItems[filteredIndex].subcategory,
-            title: response.data.title || state.filteredItems[filteredIndex].title
-          };
-        }
         
-        // 立即更新视图
-        renderKnowledgeView();
-        
-        // 重新加载数据，这会自动应用筛选和渲染，更新分类筛选器数量
+        // 重置到第一页并重新加载数据，这会：
+        // 1. 重新从服务器获取最新数据
+        // 2. 重新应用所有筛选条件（状态、分类、搜索）
+        // 3. 更新 filteredItems
+        // 4. 调用 renderKnowledgeView() 刷新卡片视图
+        // 5. 调用 renderCategoryFilters() 更新分类筛选器计数
+        state.currentPage = 1;
         await loadKnowledgeItems();
       } catch (error) {
         console.error('刷新列表失败:', error);
-        // 降级方案
-        if (window.refreshKnowledgeList) {
-          window.refreshKnowledgeList();
+        // 降级方案：如果 loadKnowledgeItems 失败，尝试重新初始化视图
+        try {
+          const { initKnowledgeView } = await import('./knowledge-items.js');
+          await initKnowledgeView();
+        } catch (fallbackError) {
+          console.error('重新初始化视图也失败:', fallbackError);
+          if (window.refreshKnowledgeList) {
+            window.refreshKnowledgeList();
+          }
         }
       }
     }, 100);
