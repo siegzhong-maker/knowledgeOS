@@ -10,7 +10,15 @@ if (DATABASE_URL || DB_TYPE === 'postgres') {
 }
 
 // 使用SQLite初始化（向后兼容）
-const sqlite3 = require('sqlite3').verbose();
+// 延迟加载 sqlite3，避免在 PostgreSQL 环境下加载原生模块
+let sqlite3;
+try {
+  sqlite3 = require('sqlite3').verbose();
+} catch (error) {
+  console.error('❌ 无法加载 sqlite3 模块:', error.message);
+  console.error('   提示: 如果使用 PostgreSQL，请设置 DATABASE_URL 环境变量');
+  process.exit(1);
+}
 const path = require('path');
 const fs = require('fs');
 
