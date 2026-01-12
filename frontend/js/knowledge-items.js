@@ -1351,7 +1351,13 @@ function initFilterButtons() {
   if (!container) return;
 
   container.querySelectorAll('.knowledge-filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    // 先移除旧的监听器（如果存在）
+    if (btn._filterClickHandler) {
+      btn.removeEventListener('click', btn._filterClickHandler);
+    }
+    
+    // 创建新的监听器函数并存储引用
+    const clickHandler = () => {
       const filter = btn.dataset.filter;
       handleFilterChange(filter);
       
@@ -1365,7 +1371,11 @@ function initFilterButtons() {
           b.classList.add('bg-white', 'text-slate-600', 'border', 'border-slate-200');
         }
       });
-    });
+    };
+    
+    // 存储监听器引用到按钮对象上
+    btn._filterClickHandler = clickHandler;
+    btn.addEventListener('click', clickHandler);
   });
 }
 

@@ -272,33 +272,14 @@ function switchView(view) {
       lucide.createIcons(elViewKnowledgeItems);
     }
     // 初始化知识库视图
-    import('./knowledge-items.js').then(({ initKnowledgeView, handleFilterChange, handleSearch }) => {
+    import('./knowledge-items.js').then(({ initKnowledgeView, handleSearch }) => {
       initKnowledgeView();
-      // 绑定筛选和搜索事件
-      const filterButtons = document.querySelectorAll('.knowledge-filter-btn');
-      filterButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const filter = btn.dataset.filter;
-          filterButtons.forEach(b => {
-            b.classList.remove('bg-slate-800', 'text-white');
-            b.classList.add('bg-white', 'text-slate-600', 'border', 'border-slate-200');
-          });
-          btn.classList.add('bg-slate-800', 'text-white');
-          btn.classList.remove('bg-white', 'text-slate-600', 'border', 'border-slate-200');
-          handleFilterChange(filter);
-        });
-      });
       
-      const searchInput = document.getElementById('knowledge-search-input');
-      if (searchInput) {
-        let searchTimeout;
-        searchInput.addEventListener('input', (e) => {
-          clearTimeout(searchTimeout);
-          searchTimeout = setTimeout(() => {
-            handleSearch(e.target.value);
-          }, 300);
-        });
-      }
+      // 注意：筛选按钮的事件绑定已在 initKnowledgeView() 内部的 initFilterButtons() 中处理
+      // 这里不再重复绑定，避免事件监听器累积导致重复触发
+      
+      // 搜索框的事件绑定（如果 initKnowledgeView 中没有处理，需要在这里绑定）
+      // 但根据代码，搜索框应该在 initKnowledgeView() 的 initSearch() 中已处理，这里也不重复绑定
       
       // 暴露刷新函数
       window.refreshKnowledgeList = () => {
