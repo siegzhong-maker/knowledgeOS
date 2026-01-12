@@ -1,12 +1,34 @@
-// 根据环境变量选择数据库类型（SQLite 或 PostgreSQL）
-const DATABASE_URL = process.env.DATABASE_URL;
-const DB_TYPE = process.env.DB_TYPE;
+// 运行时动态选择数据库类型（SQLite 或 PostgreSQL）
+// 使用懒加载模式，避免在模块加载时判断环境变量
 
-// 如果设置了 DATABASE_URL，使用 PostgreSQL
-if (DATABASE_URL || DB_TYPE === 'postgres') {
-  module.exports = require('./db-pg');
-} else {
+let dbInstance = null;
+
+// 获取数据库实例（单例模式，运行时判断）
+function getDatabase() {
+  // 如果已经初始化，直接返回
+  if (dbInstance) {
+    return dbInstance;
+  }
+
+  // 运行时检查环境变量
+  const DATABASE_URL = process.env.DATABASE_URL;
+  const DB_TYPE = process.env.DB_TYPE;
+
+  // 调试日志：帮助诊断环境变量状态
+  console.log('[Database] 检查环境变量:');
+  console.log(`  DATABASE_URL: ${DATABASE_URL ? '已设置' : '未设置'}`);
+  console.log(`  DB_TYPE: ${DB_TYPE || '未设置'}`);
+
+  // 如果设置了 DATABASE_URL，使用 PostgreSQL
+  if (DATABASE_URL || DB_TYPE === 'postgres') {
+    console.log('[Database] 使用 PostgreSQL 数据库');
+    dbInstance = require('./db-pg');
+    return dbInstance;
+  }
+
   // 否则使用 SQLite（向后兼容）
+  console.log('[Database] 使用 SQLite 数据库（开发环境）');
+  
   // 延迟加载 sqlite3，避免在 PostgreSQL 环境下加载原生模块
   let sqlite3;
   try {
@@ -16,6 +38,7 @@ if (DATABASE_URL || DB_TYPE === 'postgres') {
     console.error('   提示: 如果使用 PostgreSQL，请设置 DATABASE_URL 环境变量');
     throw new Error('sqlite3 模块加载失败。如果使用 PostgreSQL，请设置 DATABASE_URL 环境变量');
   }
+  
   const path = require('path');
   const fs = require('fs');
 
@@ -215,8 +238,21 @@ if (DATABASE_URL || DB_TYPE === 'postgres') {
     };
   }
 
-  // 单例模式
-  const db = new Database();
-  module.exports = db;
+  // 创建 SQLite 数据库实例
+  dbInstance = new Database();
+  return dbInstance;
 }
 
+// 导出：使用 getter 属性，在第一次访问时初始化
+// 这样可以在运行时判断环境变量，而不是模块加载时
+module.exports = new Proxy({}, {
+  get(target, prop) {
+    const db = getDatabase();
+    return db[prop];
+  },
+  set(target, prop, value) {
+    const db = getDatabase();
+    db[prop] = value;
+    return true;
+  }
+});
