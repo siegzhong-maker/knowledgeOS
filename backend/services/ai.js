@@ -310,32 +310,17 @@ async function testConnection(apiKey = null) {
 async function consultantChat(messages, pdfContent = null, context = null, docInfo = null, userApiKey = null) {
   // 动态生成System Prompt
   let systemPrompt = '';
-  
-  // 创业步骤框架（用于AI判断）
-  const startupSteps = `
-创业6步框架：
-1. 选方向 - 确定创业方向和赛道
-2. 找合伙人 - 寻找合适的合作伙伴，搭建团队
-3. 找用户 - 明确目标用户，建立用户画像，挖掘痛点
-4. 创产品 - 开发和迭代产品
-5. 营销1.0 - 初步营销和推广
-6. 融资 - 寻找投资和资金支持
-`;
 
   if (!docInfo && !pdfContent) {
     // 没有文档信息，作为通用助手
-    systemPrompt = `你是创业综合助手，基于知识库回答创业相关问题。
+    systemPrompt = `你是一个专业的知识助手，基于知识库回答用户的问题。
 
 **回答格式要求：**
-1. **前置判断（必须）**：在回答开头，先判断用户问题属于哪个创业步骤，格式：
-   "📌 **这个问题属于：[步骤名称]（第X步）**"
-   例如："📌 **这个问题属于：找合伙人（第2步）**"
+1. **简洁回答**：直接给出核心要点（3-5个），每个要点1-2句话，避免冗长解释
 
-2. **简洁回答**：直接给出核心要点（3-5个），每个要点1-2句话，避免冗长解释
+2. **基于知识库**：如果有知识库内容，优先基于知识库回答；如果没有，基于你的知识回答
 
-3. **基于知识库**：如果有知识库内容，基于知识库回答；如果没有，基于你的知识回答
-
-${startupSteps}
+3. **专业准确**：确保回答准确、专业，避免误导用户
 
 保持专业、简洁的语气。`;
   } else {
@@ -343,23 +328,19 @@ ${startupSteps}
     const docTitle = docInfo?.title || '知识库文档';
     const docCategory = docInfo?.category || '通用';
     const docTheme = docInfo?.theme || docTitle;
-    const assistantRole = docInfo?.role || '创业助手';
+    const assistantRole = docInfo?.role || '知识助手';
     const contextStr = context ? JSON.stringify(context) : '{}';
     
-    systemPrompt = `你是创业综合助手，基于知识库回答创业相关问题。
+    systemPrompt = `你是一个专业的知识助手，基于知识库回答用户的问题。
 
 **回答格式要求：**
-1. **前置判断（必须）**：在回答开头，先判断用户问题属于哪个创业步骤，格式：
-   "📌 **这个问题属于：[步骤名称]（第X步）**"
-   例如："📌 **这个问题属于：找合伙人（第2步）**"
+1. **简洁回答**：直接给出核心要点（3-5个），每个要点1-2句话，避免冗长解释
 
-2. **简洁回答**：直接给出核心要点（3-5个），每个要点1-2句话，避免冗长解释
+2. **引用标注**：引用文档内容时使用 [Page X] 格式，引用标记紧跟在相关内容之后
 
-3. **引用标注**：引用文档内容时使用 [Page X] 格式，引用标记紧跟在相关内容之后
+3. **基于文档**：严格基于提供的文档内容回答，不要使用文档中没有的信息
 
-4. **基于文档**：严格基于提供的文档内容回答，不要使用文档中没有的信息
-
-${startupSteps}
+4. **专业准确**：确保回答准确、专业，避免误导用户
 
 **文档主题：** ${docTheme}
 **当前用户背景：** ${contextStr}

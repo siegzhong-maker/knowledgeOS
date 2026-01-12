@@ -40,39 +40,17 @@ db.serialize(() => {
     }
   });
 
-  // 2. 插入默认知识库（创业流程）
-  const defaultKbId = 'kb-entrepreneurship';
-  const now = Date.now();
+  // 2. 知识库表已创建完成（不再自动创建默认知识库）
+  // 用户可以通过API或界面手动创建知识库
   
-  db.run(`
-    INSERT OR REPLACE INTO knowledge_bases 
-    (id, name, description, icon, color, is_default, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    defaultKbId,
-    '创业流程',
-    '6步18关创业知识体系',
-    'rocket',
-    '#6366f1',
-    1, // 默认知识库
-    now,
-    now
-  ], (err) => {
+  // 关闭数据库连接
+  db.close((err) => {
     if (err) {
-      console.error('插入默认知识库失败:', err.message);
+      console.error('关闭数据库失败:', err.message);
     } else {
-      console.log('✓ 已创建默认知识库：创业流程');
+      console.log('知识库表创建完成');
     }
-    
-    // 关闭数据库连接
-    db.close((err) => {
-      if (err) {
-        console.error('关闭数据库失败:', err.message);
-      } else {
-        console.log('知识库表创建完成');
-      }
-      process.exit(0);
-    });
+    process.exit(0);
   });
 });
 

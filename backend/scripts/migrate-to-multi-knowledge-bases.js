@@ -19,8 +19,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
   console.log('已连接到SQLite数据库');
 });
 
-const defaultKbId = 'kb-entrepreneurship';
-
 db.serialize(() => {
   console.log('开始多知识库系统迁移...\n');
   
@@ -45,29 +43,8 @@ db.serialize(() => {
     }
   });
 
-  // 步骤2: 插入默认知识库
-  const now = Date.now();
-  db.run(`
-    INSERT OR REPLACE INTO knowledge_bases 
-    (id, name, description, icon, color, is_default, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    defaultKbId,
-    '创业流程',
-    '6步18关创业知识体系',
-    'rocket',
-    '#6366f1',
-    1,
-    now,
-    now
-  ], (err) => {
-    if (err) {
-      console.error('插入默认知识库失败:', err.message);
-      process.exit(1);
-    } else {
-      console.log('✓ 步骤2: 已创建默认知识库：创业流程');
-    }
-  });
+  // 步骤2: 知识库表已创建（不再自动创建默认知识库）
+  console.log('✓ 步骤2: 知识库表结构已准备就绪');
 
   // 步骤3: 创建新的modules表
   db.run(`

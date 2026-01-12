@@ -1,7 +1,7 @@
 {
-  "name": "knowledge-manager",
+  "name": "knowledgeos",
   "version": "1.0.0",
-  "description": "知识管理系统 - 文本内容采集、管理和AI辅助处理",
+  "description": "KnowledgeOS - 通用知识管理平台，支持多种格式内容采集、AI知识提取和智能问答",
   "main": "backend/server.js",
   "scripts": {
     "dev": "node backend/server.js",

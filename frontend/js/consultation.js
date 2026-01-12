@@ -334,72 +334,8 @@ export async function initConsultation() {
     overlay.style.opacity = '1';
   }
   try {
-    // 先初始化知识库系统（在函数顶部声明一次，后续复用）
-    const kbModule = await import('./knowledge-bases.js');
-    const initSuccess = await kbModule.initKnowledgeBases();
-    
-    // 无论初始化成功与否，都渲染知识库切换器
-    kbModule.renderKnowledgeBaseSwitcher();
-    
-    if (!initSuccess) {
-      console.warn('知识库初始化失败，但继续初始化其他模块');
-    }
-    
-    // 监听知识库切换事件
-    document.addEventListener('knowledgeBaseChanged', async (e) => {
-      const { knowledgeBaseId, knowledgeBase } = e.detail;
-      console.log('知识库切换:', knowledgeBaseId, knowledgeBase);
-      
-      // 清除API缓存，确保获取最新数据
-      const { clearAPICache } = await import('./api.js');
-      clearAPICache();
-      
-      // 显示知识库切换加载状态
-      const loadingIndicator = document.getElementById('kb-loading-indicator');
-      if (loadingIndicator) {
-        loadingIndicator.classList.remove('hidden');
-      }
-      // 当前知识库指示器显示“正在切换…”
-      try {
-        updateCurrentKBIndicator(knowledgeBase, { isSwitching: true });
-      } catch (err) {
-        console.warn('更新当前知识库指示器失败（切换中）:', err);
-      }
-      
-      try {
-        // 重新加载PDF列表
-        await loadPDFList();
-        
-        // 重新加载并渲染对话历史
-        await renderConversationHistory();
-      } finally {
-        // 隐藏加载状态
-        if (loadingIndicator) {
-          loadingIndicator.classList.add('hidden');
-        }
-        // 切换完成后更新当前知识库指示器（包含最新文档数量）
-        try {
-          updateCurrentKBIndicator(knowledgeBase);
-        } catch (err) {
-          console.warn('更新当前知识库指示器失败（切换完成）:', err);
-        }
-      }
-    });
-    
     // 加载PDF列表
     await loadPDFList();
-
-    // 初始化当前知识库指示信息
-    try {
-      if (kbModule.getCurrentKnowledgeBase) {
-        const currentKb = kbModule.getCurrentKnowledgeBase();
-        updateCurrentKBIndicator(currentKb);
-      } else {
-        updateCurrentKBIndicator(null);
-      }
-    } catch (err) {
-      console.warn('初始化当前知识库指示器失败:', err);
-    }
     
     // 初始化对话区域（默认显示，不显示欢迎界面）
     initChatArea();
@@ -2526,8 +2462,8 @@ function generateSuggestions(trustLevel, overallScore, citationValidation) {
   if (trustLevel.level === 'low') {
     suggestions.push({
       title: '在问题中明确指出需要引用的文档',
-      detail: '例如："根据《创业流程》文档，..." 或 "参考知识库中的相关内容"',
-      example: '❌ "什么是好老大？"\n✓ "根据知识库中的《创业流程》文档，什么是好老大的标准？"'
+      detail: '例如："根据知识库中的文档，..." 或 "参考知识库中的相关内容"',
+      example: '❌ "什么是好方法？"\n✓ "根据知识库中的文档，什么是好方法的标准？"'
     });
     suggestions.push({
       title: '检查知识库中是否有相关文档',
@@ -2543,7 +2479,7 @@ function generateSuggestions(trustLevel, overallScore, citationValidation) {
     suggestions.push({
       title: '更明确地指定引用的文档',
       detail: '在提问时指出具体的文档或章节',
-      example: '例如："根据《创业流程》第3章的内容..."'
+      example: '例如："根据知识库中第3章的内容..."'
     });
     suggestions.push({
       title: '要求AI引用具体页面',
